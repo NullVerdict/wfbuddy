@@ -62,7 +62,8 @@ impl IePol {
 	}
 	
 	pub fn delay_till(&self, time: Instant) {
-		if time > *self.next_pol.read().unwrap() {
+		// if time > *self.next_pol.read().unwrap() {
+		if time > Instant::now() {
 			*self.next_pol.write().unwrap() = time;
 		}
 	}

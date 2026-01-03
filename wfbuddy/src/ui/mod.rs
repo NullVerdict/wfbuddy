@@ -12,11 +12,12 @@ pub struct WFBuddy {
 
 impl WFBuddy {
 	pub fn new(_cc: &eframe::CreationContext) -> Self {
-		let lang = crate::config().client_language.ocr_code();
-		let ie = std::sync::Arc::new(ie::Ie::new(crate::config().theme, "ocr/detection.mnn", format!("ocr/{lang}_recognition.mnn"), format!("ocr/{lang}_charset.txt")));
+		let lang = crate::config().client_language;
+		let ocr_code = lang.ocr_code();
+		let ie = std::sync::Arc::new(ie::Ie::new(crate::config().theme, "ocr/detection.mnn", format!("ocr/{ocr_code}_recognition.mnn"), format!("ocr/{ocr_code}_charset.txt")));
 		let uniform = std::sync::Arc::new(crate::UniformData {
 			iepol: IePol::new(ie.clone()),
-			data: data::Data::populated(),
+			data: data::Data::populated(lang).unwrap(),
 			ie,
 		});
 		

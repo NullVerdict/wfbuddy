@@ -30,28 +30,38 @@ impl RelicReward {
 		self.current_rewards = rewards.rewards
 			.into_iter()
 			.map(|reward| {
-				let name = self.uniform.data.find_item_name(&reward.name);
+				let lang = crate::config().client_language;
+				let name = self.uniform.data.find_item_name((lang, &reward.name));
+				let id = self.uniform.data.id_manager.get_id_from_locale((lang, name)).unwrap();
 				Reward {
-					vaulted: self.uniform.data.vaulted_items.contains(&name),
-					platinum: self.uniform.data.platinum_values.get(&name).map(|v| *v).unwrap_or_default(),
-					ducats: self.uniform.data.ducat_values.get(&name).map(|v| *v).unwrap_or_default(),
+					vaulted: self.uniform.data.vaulted_items.contains(&id),
+					platinum: self.uniform.data.platinum_values.get(&id).map(|v| *v).unwrap_or_default(),
+					ducats: self.uniform.data.ducat_values.get(&id).map(|v| *v).unwrap_or_default(),
 					owned: reward.owned,
-					name,
+					name: name.to_owned(),
 				}
 			})
 			.collect::<Vec<_>>();
 		println!("timer is {}", rewards.timer);
-		self.uniform.iepol.delay_till(Instant::now() + Duration::from_secs(rewards.timer as u64 - 1));
+		self.uniform.iepol.delay_till(Instant::now() + Duration::from_secs(rewards.timer as u64 - 2));
 	}
 	
 	fn check_selected(&mut self, image: std::sync::Arc<ie::OwnedImage>) {
 		let selected = self.uniform.ie.relicreward_get_selected(image.as_image());
 		if let Some(reward) = self.current_rewards.get(selected as usize) {
-			println!("incrementing {} as the picked index was {selected}", reward.name);
-			*self.selected_rewards.entry(reward.name.clone()).or_insert(0) += 1;
+			let mut name = reward.name.clone();
+			let mut amount = 1;
+			if name.starts_with("2 X ") {
+				name = name.trim_start_matches("2 X ").to_owned();
+				amount = 2;
+			}
+			
+			println!("incrementing {name} by {amount} as the picked index was {selected}");
+			*self.selected_rewards.entry(name).or_insert(0) += amount;
 		}
 		
 		self.current_rewards.clear();
+		self.uniform.iepol.delay_till(Instant::now() + Duration::from_secs(15));
 	}
 }
 
@@ -95,8 +105,9 @@ impl super::Module for RelicReward {
 				ui.label(format!("Platinum: {}", plat));
 				ui.label(format!("Ducats: {}", reward.ducats));
 				
-				if reward.owned > 0 {
-					ui.label(format!("Owned: {}", reward.owned + self.selected_rewards.get(&reward.name).map_or(0, |v| *v)));
+				let owned = reward.owned + self.selected_rewards.get(&reward.name).map_or(0, |v| *v);
+				if owned > 0 {
+					ui.label(format!("Owned: {}", owned));
 				} else {
 					ui.label("");
 				}

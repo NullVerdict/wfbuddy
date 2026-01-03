@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
 	pub app_id: String,
 	pub theme: ie::Theme,
-	pub client_language: crate::Language,
+	pub client_language: data::Language,
 	
 	// not used anymore (for now?), the game buffering writing to log could take 10+ sec, making it nearly useless
 	pub log_path: String,
@@ -39,7 +39,7 @@ impl Default for Config {
 				primary: ie::Color::WHITE,
 				secondary: ie::Color::WHITE,
 			},
-			client_language: crate::Language::English,
+			client_language: data::Language::English,
 			
 			#[cfg(unix)]
 			log_path: dirs::home_dir().unwrap().join(".steam/steam/steamapps/compatdata/230410/pfx/drive_c/users/steamuser/AppData/Local/Warframe/EE.log").to_string_lossy().to_string(),

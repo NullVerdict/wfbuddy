@@ -1,7 +1,5 @@
 use std::sync::{Arc, LazyLock, Mutex};
 
-mod lang;
-pub use lang::Language;
 pub mod util;
 pub mod capture;
 // mod logwatcher;
