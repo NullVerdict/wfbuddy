@@ -7,7 +7,7 @@ use crate::iepol::{EventReceiver, IePolWatchType};
 
 use ie::screen::relicreward::Rarity;
 
-use crate::ui::ext::UiExt;
+use crate::UiExt;
 
 pub struct RelicReward {
 	uniform: crate::Uniform,
