@@ -279,7 +279,7 @@ pub(crate) fn get_rewards(image: Image, theme: Theme, ocr: &Ocr, ui_scale: f32) 
 	let layout = reward_layout(image, ui_scale);
 	let reward_images = get_reward_subimages(image, ui_scale, layout.count);
 
-	let rewards = reward_images
+	let rewards: Vec<Reward> = reward_images
 		.into_iter()
 		.zip(layout.rarities)
 		.filter_map(|(reward_image, rarity)| {
