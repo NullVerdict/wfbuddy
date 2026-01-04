@@ -27,6 +27,7 @@ pub struct RelicReward {
 	overlay_placement: Option<OverlayPlacement>,
 	last_reward_seen: Option<Instant>,
 	next_auto_check: Instant,
+	auto_candidate_hits: u8,
 }
 
 impl RelicReward {
@@ -46,6 +47,7 @@ impl RelicReward {
 			overlay_placement: None,
 			last_reward_seen: None,
 			next_auto_check: Instant::now(),
+			auto_candidate_hits: 0,
 		}
 	}
 
@@ -289,7 +291,7 @@ impl super::Module for RelicReward {
 			let ui_scale = crate::config().wf_ui_scale;
 			let rewards = self.uniform.ie.relicreward_get_rewards(image.as_image(), ui_scale);
 
-			let reward_screen = rewards.present || rewards.timer > 0 || !rewards.rewards.is_empty();
+			let reward_screen = rewards.present;
 			if reward_screen {
 				let app_id = { crate::config().app_id.clone() };
 				self.reward_screen_active = true;
@@ -315,26 +317,46 @@ impl super::Module for RelicReward {
 		}
 
 		// Throttle captures to avoid burning CPU/GPU.
+		// We scan slowly while idle, speed up while confirming, and run faster once the reward screen is active.
+		let interval = if self.reward_screen_active {
+			Duration::from_millis(200)
+		} else if self.auto_candidate_hits > 0 {
+			Duration::from_millis(150)
+		} else {
+			Duration::from_millis(650)
+		};
+
 		if now < self.next_auto_check {
 			return;
 		}
-		self.next_auto_check = now + Duration::from_millis(250);
+		self.next_auto_check = now + interval;
 
 		let Some(image) = crate::capture::capture_specific(&app_id) else { return };
 		let rewards = self.uniform.ie.relicreward_get_rewards(image.as_image(), ui_scale);
 
-		let reward_screen = rewards.present || rewards.timer > 0 || !rewards.rewards.is_empty();
+		let reward_screen = rewards.present;
+
+		if reward_screen {
+			self.auto_candidate_hits = self.auto_candidate_hits.saturating_add(1).min(5);
+		} else {
+			self.auto_candidate_hits = 0;
+		}
 
 		// If we're not on the reward screen, clear the overlay after a short grace period.
 		if !reward_screen {
-			if let Some(last) = self.last_reward_seen {
-				if now.duration_since(last) > Duration::from_secs(2) {
-					self.current_rewards.clear();
-					self.reward_screen_active = false;
-					self.overlay_placement = None;
-					self.last_reward_seen = None;
-				}
+			if let Some(last) = self.last_reward_seen
+				&& now.duration_since(last) > Duration::from_secs(2)
+			{
+				self.current_rewards.clear();
+				self.reward_screen_active = false;
+				self.overlay_placement = None;
+				self.last_reward_seen = None;
 			}
+			return;
+		}
+
+		// Require a couple consecutive positives before activating the overlay, to avoid false triggers.
+		if !self.reward_screen_active && self.auto_candidate_hits < 2 {
 			return;
 		}
 

@@ -299,7 +299,20 @@ pub(crate) fn get_rewards(image: Image, theme: Theme, ocr: &Ocr, ui_scale: f32) 
 		})
 		.collect();
 
-	let present = layout.hit_count > 0 || timer > 0 || !rewards.is_empty();
+	let icon_ratio = layout.hit_count as f32 / layout.count as f32;
+
+	let icon_strong = if layout.count == 1 {
+		// A single-slot (solo) run is easier to false-positive, so require either a timer digit
+		// or at least one successfully OCR'd reward name.
+		layout.hit_count == 1 && (timer > 0 || !rewards.is_empty())
+	} else {
+		// For 2+ slots, require that most rarity icons match.
+		icon_ratio >= 0.6
+	};
+
+	// As a fallback, if we can OCR multiple reward names *and* at least one rarity icon matched,
+	// we're almost certainly on the reward screen.
+	let present = icon_strong || (layout.hit_count >= 1 && rewards.len() >= 2);
 
 	Rewards { timer, present, layout_count: layout.count, reward_area: reward_area_rect(image, ui_scale, layout.count), rewards }
 }
