@@ -5,6 +5,12 @@ use crate::{
 
 mod ext;
 pub use ext::UiExt;
+
+#[derive(Debug, Clone, Copy)]
+pub struct OverlayPlacement {
+	pub pos: egui::Pos2,
+	pub size: egui::Vec2,
+}
 mod settings;
 
 pub struct WFBuddy {
@@ -89,7 +95,13 @@ impl WFBuddy {
 	}
 
 	fn any_overlay_active(&mut self) -> bool {
-		self.modules.iter_mut().any(|m| m.overlay_active())
+		self.modules.iter().any(|m| m.overlay_active())
+	}
+
+	fn first_overlay_placement(&self) -> Option<OverlayPlacement> {
+		self.modules
+			.iter()
+			.find_map(|m| if m.overlay_active() { m.overlay_placement() } else { None })
 	}
 
 	fn ui_overlay_panel(&mut self, ui: &mut egui::Ui) {
@@ -128,27 +140,23 @@ impl WFBuddy {
 			None
 		};
 
-		// Keep the overlay window small and focused. A full-size transparent window is fragile on some systems.
-		let overlay_size = egui::vec2(480.0, 280.0);
+		let placement = if attach_to_game { self.first_overlay_placement() } else { None };
 
-		let mut builder = egui::ViewportBuilder::default()
-			.with_title("WFBuddy Overlay")
-			// When click-through is off, keep decorations so the user can move the overlay.
-			.with_decorations(!passthrough)
-			.with_always_on_top()
-			.with_transparent(true)
-			.with_resizable(!passthrough)
-			.with_taskbar(false)
-			.with_mouse_passthrough(passthrough);
-
-		// Position relative to the game window when available, otherwise top-left of the screen.
-		let pos = if let Some(b) = bounds {
+		// Default size/position: small panel near the game window corner.
+		let default_size = egui::vec2(480.0, 280.0);
+		let default_pos = if let Some(b) = bounds {
 			egui::pos2(b.x + margin, b.y + margin)
 		} else {
 			egui::pos2(margin, margin)
 		};
 
-		builder = builder.with_position(pos).with_inner_size(overlay_size);
+		let (pos, size) = if let Some(p) = placement {
+			(p.pos, p.size)
+		} else {
+			(default_pos, default_size)
+		};
+
+		builder = builder.with_position(pos).with_inner_size(size);
 
 		let overlay_id = egui::ViewportId::from_hash_of("wfbuddy_overlay");
 

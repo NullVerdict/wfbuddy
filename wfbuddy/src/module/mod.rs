@@ -30,5 +30,15 @@ pub trait Module {
 		self.ui_important(ui)
 	}
 
+	/// Optional placement information for the overlay viewport.
+	///
+	/// If provided, the main UI will position/size the overlay accordingly.
+	#[allow(unused_variables)]
+	fn overlay_placement(&self) -> Option<crate::ui::OverlayPlacement> {
+		None
+	}
+
+
 	fn tick(&mut self) {}
+
 }

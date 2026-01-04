@@ -7,7 +7,10 @@ use crate::iepol::{EventReceiver, IePolWatchType};
 
 use ie::screen::relicreward::Rarity;
 
+// `UiExt` is re-exported at the crate root (`pub use ui::UiExt;`).
+// Importing via `crate::ui::ext` fails because `ext` is intentionally private.
 use crate::UiExt;
+use crate::ui::OverlayPlacement;
 
 pub struct RelicReward {
 	uniform: crate::Uniform,
@@ -16,6 +19,14 @@ pub struct RelicReward {
 
 	current_rewards: Vec<Reward>,
 	selected_rewards: BTreeMap<String, u32>,
+
+	// True while the relic reward screen is detected.
+	reward_screen_active: bool,
+
+	// Overlay placement computed from the last detected reward screen.
+	overlay_placement: Option<OverlayPlacement>,
+	last_reward_seen: Option<Instant>,
+	next_auto_check: Instant,
 }
 
 impl RelicReward {
@@ -31,6 +42,10 @@ impl RelicReward {
 			rewards_rs,
 			current_rewards: Vec::new(),
 			selected_rewards: BTreeMap::new(),
+			reward_screen_active: false,
+			overlay_placement: None,
+			last_reward_seen: None,
+			next_auto_check: Instant::now(),
 		}
 	}
 
@@ -109,6 +124,51 @@ impl RelicReward {
 			.iepol
 			.delay_till(Instant::now() + Duration::from_secs(15));
 	}
+
+	fn update_overlay_placement(
+		&mut self,
+		app_id: &str,
+		capture: ie::Image,
+		rewards: &ie::screen::relicreward::Rewards,
+	) {
+		let Some(bounds) = crate::capture::window_bounds(app_id) else {
+			self.overlay_placement = None;
+			return;
+		};
+
+		let cap_w = capture.width() as f32;
+		let cap_h = capture.height() as f32;
+
+		// Convert capture pixel coordinates into egui logical coordinates.
+		// xcap window bounds may be in logical units (common) or physical pixels depending on platform.
+		// We detect which by comparing captured pixel dimensions against the reported window size.
+		let scale = bounds.scale_factor.max(1.0);
+
+		let bounds_are_logical = {
+			let expect_physical_w = bounds.width * scale;
+			let expect_physical_h = bounds.height * scale;
+			(cap_w - expect_physical_w).abs() / cap_w.max(1.0) < 0.15
+				&& (cap_h - expect_physical_h).abs() / cap_h.max(1.0) < 0.15
+		};
+
+		let base_x = if bounds_are_logical { bounds.x } else { bounds.x / scale };
+		let base_y = if bounds_are_logical { bounds.y } else { bounds.y / scale };
+
+		let px_to_logical = 1.0 / scale;
+
+		let area = rewards.reward_area;
+		let pos = egui::pos2(
+			base_x + area.x as f32 * px_to_logical,
+			base_y + area.y as f32 * px_to_logical,
+		);
+
+		let size = egui::vec2(
+			area.w as f32 * px_to_logical,
+			area.h as f32 * px_to_logical,
+		);
+
+		self.overlay_placement = Some(OverlayPlacement { pos, size });
+	}
 }
 
 impl super::Module for RelicReward {
@@ -141,11 +201,18 @@ impl super::Module for RelicReward {
 	}
 
 	fn overlay_active(&self) -> bool {
-		!self.current_rewards.is_empty()
+		self.reward_screen_active
+	}
+
+	fn overlay_placement(&self) -> Option<crate::ui::OverlayPlacement> {
+		self.overlay_placement
 	}
 
 	fn ui_overlay(&mut self, ui: &mut egui::Ui) -> bool {
-		// Reuse the important UI, but keep it compact.
+		if self.current_rewards.is_empty() {
+			ui.label("Detecting relic rewards…");
+			return true;
+		}
 		self.ui_important(ui)
 	}
 
@@ -215,20 +282,74 @@ impl super::Module for RelicReward {
 	}
 
 	fn tick(&mut self) {
-		let Ok(image) = self.rewards_rs.try_recv() else { return };
+		let now = Instant::now();
 
-		let ui_scale = crate::config().wf_ui_scale;
+		// 1) Event-driven path (party header watcher), if it fires.
+		if let Ok(image) = self.rewards_rs.try_recv() {
+			let ui_scale = crate::config().wf_ui_scale;
+			let rewards = self.uniform.ie.relicreward_get_rewards(image.as_image(), ui_scale);
+
+			let reward_screen = rewards.present || rewards.timer > 0 || !rewards.rewards.is_empty();
+			if reward_screen {
+				let app_id = { crate::config().app_id.clone() };
+				self.reward_screen_active = true;
+				self.update_overlay_placement(&app_id, image.as_image(), &rewards);
+				self.last_reward_seen = Some(now);
+			}
+
+			if rewards.timer >= 3 {
+				self.check_rewards(rewards);
+			} else if !self.current_rewards.is_empty() {
+				self.check_selected(image);
+			}
+		}
+
+		// 2) Automatic detection path (no button-click required).
+		let (overlay_enabled, app_id, ui_scale) = {
+			let cfg = crate::config();
+			(cfg.overlay_enabled, cfg.app_id.clone(), cfg.wf_ui_scale)
+		};
+
+		if !overlay_enabled {
+			return;
+		}
+
+		// Throttle captures to avoid burning CPU/GPU.
+		if now < self.next_auto_check {
+			return;
+		}
+		self.next_auto_check = now + Duration::from_millis(250);
+
+		let Some(image) = crate::capture::capture_specific(&app_id) else { return };
 		let rewards = self.uniform.ie.relicreward_get_rewards(image.as_image(), ui_scale);
+
+		let reward_screen = rewards.present || rewards.timer > 0 || !rewards.rewards.is_empty();
+
+		// If we're not on the reward screen, clear the overlay after a short grace period.
+		if !reward_screen {
+			if let Some(last) = self.last_reward_seen {
+				if now.duration_since(last) > Duration::from_secs(2) {
+					self.current_rewards.clear();
+					self.reward_screen_active = false;
+					self.overlay_placement = None;
+					self.last_reward_seen = None;
+				}
+			}
+			return;
+		}
+
+		self.reward_screen_active = true;
+		self.last_reward_seen = Some(now);
+		self.update_overlay_placement(&app_id, image.as_image(), &rewards);
 
 		// When the reward timer is almost over, the name list area changes (and is less reliable),
 		// so we switch to detecting the selected reward instead.
-		if rewards.timer >= 3 {
+		if rewards.timer >= 3 || self.current_rewards.is_empty() {
 			self.check_rewards(rewards);
 		} else {
-			self.check_selected(image);
+			self.check_selected(std::sync::Arc::new(image));
 		}
-	}
-}
+	}}
 
 #[derive(Clone)]
 struct Reward {

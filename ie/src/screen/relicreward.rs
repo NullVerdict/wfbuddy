@@ -35,8 +35,22 @@ pub struct Reward {
 	pub rarity: Rarity,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct RewardArea {
+	pub x: u32,
+	pub y: u32,
+	pub w: u32,
+	pub h: u32,
+}
+
 pub struct Rewards {
 	pub timer: u32,
+	/// Heuristic: whether the relic reward screen is likely visible.
+	pub present: bool,
+	/// Number of reward slots detected (1..=4), even if OCR misses a name.
+	pub layout_count: u32,
+	/// Rectangle of the reward-card area in *capture image pixel* coordinates.
+	pub reward_area: RewardArea,
 	pub rewards: Vec<Reward>,
 }
 
@@ -76,6 +90,7 @@ fn clamp_sub_image(image: Image, x: i32, y: i32, w: u32, h: u32) -> Image {
 #[derive(Debug, Clone)]
 struct RewardLayout {
 	count: u32,
+	hit_count: u32,
 	rarities: Vec<Rarity>,
 }
 
@@ -192,8 +207,28 @@ fn reward_layout(image: Image, ui_scale: f32) -> RewardLayout {
 
 	RewardLayout {
 		count: best_count,
+		hit_count: best_hits.max(0) as u32,
 		rarities: best_rarities,
 	}
+}
+
+
+fn reward_area_rect(image: Image, ui_scale: f32, count: u32) -> RewardArea {
+	const REWARD_SIZE: u32 = 235;
+	const REWARD_SPACING: u32 = 8;
+	const REWARD_Y: u32 = 225;
+
+	let reward_size = px(REWARD_SIZE, image, ui_scale);
+	let spacing = px(REWARD_SPACING, image, ui_scale);
+	let reward_y = px(REWARD_Y, image, ui_scale);
+
+	let mut area_w = count * reward_size + count.saturating_sub(1) * spacing;
+	// Match `trimmed_centerh`: clamp to image width and force even.
+	area_w = area_w.min(image.width());
+	area_w = (area_w >> 1) << 1;
+
+	let x = (image.width().saturating_sub(area_w)) / 2;
+	RewardArea { x, y: reward_y, w: area_w, h: reward_size }
 }
 
 fn get_reward_subimages(image: Image, ui_scale: f32, count: u32) -> Vec<Image> {
@@ -264,7 +299,9 @@ pub(crate) fn get_rewards(image: Image, theme: Theme, ocr: &Ocr, ui_scale: f32) 
 		})
 		.collect();
 
-	Rewards { timer, rewards }
+	let present = layout.hit_count > 0 || timer > 0 || !rewards.is_empty();
+
+	Rewards { timer, present, layout_count: layout.count, reward_area: reward_area_rect(image, ui_scale, layout.count), rewards }
 }
 
 pub(crate) fn get_selected(image: Image, theme: Theme, ui_scale: f32) -> u32 {
