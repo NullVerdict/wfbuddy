@@ -166,7 +166,7 @@ impl WFBuddy {
 			egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
 				ui.horizontal(|ui| {
 					ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
-					for card in cards {
+						for card in cards.iter() {
 						let frame = egui::Frame::NONE
 							.fill(egui::Color32::from_black_alpha(120))
 							.stroke(ui.visuals().window_stroke)
@@ -174,7 +174,7 @@ impl WFBuddy {
 							.inner_margin(egui::Margin::same(10));
 						frame.show(ui, |ui| {
 							ui.set_min_width(210.0);
-							ui.label(egui::RichText::new(&card.name).strong());
+							ui.label(egui::RichText::new(card.name.as_str()).strong());
 							ui.add_space(2.0);
 							ui.horizontal(|ui| {
 								ui.label(format!("{}p", card.platinum));

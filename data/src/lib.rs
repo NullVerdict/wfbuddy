@@ -214,10 +214,8 @@ fn fetch_vaulted_items() -> Result<HashSet<String>> {
 
 	let mut set = HashSet::new();
 	for item in items {
-		if item.vaulted.unwrap_or(false) {
-			if let Some(name) = item.name {
-				set.insert(name);
-			}
+		if item.vaulted.unwrap_or(false) && let Some(name) = item.name {
+			set.insert(name);
 		}
 	}
 	Ok(set)
