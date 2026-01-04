@@ -18,9 +18,13 @@ impl PublicExport {
 	fn new_url(url: &str) -> Result<Self> {
 		use std::io::Read;
 
-		let mut reader = ureq::get(url).call().context("GET publicexport index")?.into_reader();
+		// ureq 3.x returns an `http::Response<ureq::Body>`. Read bytes via `Body::as_reader()`.
+		let mut resp = ureq::get(url).call().context("GET publicexport index")?;
 		let mut data = Vec::new();
-		reader.read_to_end(&mut data).context("Read publicexport index bytes")?;
+		resp.body_mut()
+			.as_reader()
+			.read_to_end(&mut data)
+			.context("Read publicexport index bytes")?;
 
 		let mut decompressed = Vec::new();
 		lzma_rs::lzma_decompress(&mut std::io::Cursor::new(data), &mut decompressed)

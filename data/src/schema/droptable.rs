@@ -9,8 +9,13 @@ const URL: &str = "https://warframe.com/droptables";
 /// We keep this intentionally simple (best-effort): if the page layout changes, we just won't
 /// populate vaulted detection, but the rest of the app still works.
 pub fn downloaded_relic_names() -> Result<HashSet<String>> {
-	let resp = ureq::get(URL).call().context("GET droptables")?;
-	let html = resp.into_string().context("Read droptables HTML")?;
+	// With ureq 3.x, `ureq::get(...).call()` returns an `http::Response<ureq::Body>`.
+	// Reading text is done via `body_mut().read_to_string()`.
+	let mut resp = ureq::get(URL).call().context("GET droptables")?;
+	let html = resp
+		.body_mut()
+		.read_to_string()
+		.context("Read droptables HTML")?;
 
 	// This is the same basic approach as the original project: match the first <td> in a row.
 	// Example match: <tr><td>Lith A1 Relic</td>
