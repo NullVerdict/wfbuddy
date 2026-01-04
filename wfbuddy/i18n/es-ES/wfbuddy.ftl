@@ -14,7 +14,9 @@ label-window-mode = Modo de ventana
 mode-window = Ventana
 mode-overlay = Superposición
 label-overlay-clickthrough = Superposición sin clics
-hint-overlay-hotkey = Pulsa F8 para alternar interacción
+overlay-status-clickthrough = Sin clics
+overlay-status-interactive = Interactiva
+hint-overlay-clickthrough = Si está activado, la superposición no aceptará clics. Desactívalo para abrir ajustes.
 
 btn-set-theme = Configurar tema (abre los ajustes de Warframe con el submenú en teclado/ratón). Requiere reinicio.
 label-warframe-window = ID de ventana de Warframe

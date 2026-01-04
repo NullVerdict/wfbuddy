@@ -38,7 +38,7 @@ fn main() {
 			.viewport
 			.with_decorations(false)
 			.with_transparent(true)
-			.with_always_on_top(true);
+			.with_always_on_top();
 	}
 
 	let _ = eframe::run_native(

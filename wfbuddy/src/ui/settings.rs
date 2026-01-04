@@ -35,7 +35,7 @@ pub fn ui(ui: &mut egui::Ui, modules: &mut [Box<dyn crate::module::Module>]) {
 		ui.label(crate::tr!("label-ui-language"));
 		let before = config.ui_locale.clone();
 
-		egui::ComboBox::from_id_source("ui_locale")
+		egui::ComboBox::from_id_salt("ui_locale")
 			.selected_text(&config.ui_locale)
 			.show_ui(ui, |ui| {
 				ui.selectable_value(&mut config.ui_locale, "en-US".to_string(), "en-US");
@@ -56,7 +56,7 @@ pub fn ui(ui: &mut egui::Ui, modules: &mut [Box<dyn crate::module::Module>]) {
 		ui.label(crate::tr!("label-window-mode"));
 
 		let before = config.ui_mode;
-		egui::ComboBox::from_id_source("ui_mode")
+		egui::ComboBox::from_id_salt("ui_mode")
 			.selected_text(match config.ui_mode {
 				crate::config::UiMode::Window => crate::tr!("mode-window"),
 				crate::config::UiMode::Overlay => crate::tr!("mode-overlay"),
@@ -84,7 +84,7 @@ pub fn ui(ui: &mut egui::Ui, modules: &mut [Box<dyn crate::module::Module>]) {
 		changed |= ui
 			.checkbox(&mut config.overlay_click_through, crate::tr!("label-overlay-clickthrough"))
 			.changed();
-		ui.small(crate::tr!("hint-overlay-hotkey"));
+		ui.small(crate::tr!("hint-overlay-clickthrough"));
 	}
 
 	// Module settings

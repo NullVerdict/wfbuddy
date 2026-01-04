@@ -9,7 +9,7 @@ pub struct OwnedImage {
 
 impl OwnedImage {
 	pub fn from_rgba(width: usize, bytes: &[u8]) -> Self {
-		let height = bytes.len() as usize / width / 4;
+		let height = bytes.len() / width / 4;
 		let data = bytes
 			.chunks_exact(4)
 			.map(|v| Color::new(v[0], v[1], v[2]))
@@ -29,10 +29,11 @@ impl OwnedImage {
 		let mut buf = vec![0u8; reader.output_buffer_size().ok_or("Png too big for this systems memory (how tf)")?];
 		let info = reader.next_frame(&mut buf)?;
 		let bytes = &buf[..info.buffer_size()];
-		let height = bytes.len() as usize / info.width as usize / 4;
+		let width = info.width as usize;
+		let height = bytes.len() / width / 4;
 		
-		let mut data = Vec::with_capacity(info.width as usize * height);
-		let mut mask = vec![0u8; info.width as usize * height / 8 + 1];
+		let mut data = Vec::with_capacity(width * height);
+		let mut mask = vec![0u8; width * height / 8 + 1];
 		
 		for (i, v) in bytes.chunks_exact(4).enumerate() {
 			data.push(Color::new(v[0], v[1], v[2]));
@@ -56,17 +57,30 @@ impl OwnedImage {
 		println!("resizing");
 		// cba implementing the trait on this
 		let width = self.width * height / self.height;
-		let img = fast_image_resize::images::ImageRef::from_pixels(self.width, self.height, unsafe{std::slice::from_raw_parts(self.data[..].as_ptr() as *const fast_image_resize::pixels::U8x3, self.data.len())}).unwrap();
+		let img = fast_image_resize::images::ImageRef::from_pixels(
+			self.width,
+			self.height,
+			unsafe {
+				std::slice::from_raw_parts(
+					self.data[..].as_ptr() as *const fast_image_resize::pixels::U8x3,
+					self.data.len(),
+				)
+			},
+		)
+		.unwrap();
 		let mut dst = fast_image_resize::images::Image::new(width, height, fast_image_resize::PixelType::U8x3);
 		
 		let mut resizer = fast_image_resize::Resizer::new();
 		resizer.resize(&img, &mut dst, &Some(fast_image_resize::ResizeOptions::new().resize_alg(fast_image_resize::ResizeAlg::Interpolation(fast_image_resize::FilterType::CatmullRom)))).unwrap();
 		
-		*self = Self {
-			width,
-			height,
-			data: unsafe{std::mem::transmute(dst.into_vec())},
-		}
+		// `fast_image_resize` returns a packed RGB byte buffer for `U8x3`.
+		// Convert it safely into our `Vec<Color>` without `transmute`.
+		let bytes = dst.into_vec();
+		let data = bytes
+			.chunks_exact(3)
+			.map(|v| Color::new(v[0], v[1], v[2]))
+			.collect::<Vec<_>>();
+		*self = Self { width, height, data };
 	}
 	
 	#[inline]
@@ -294,7 +308,7 @@ impl<'a> Image<'a> {
 			}
 		}
 		
-		let count = (self.width() * self.height()) as u32;
+		let count = self.width() * self.height();
 		Color {
 			r: (r / count) as u8,
 			g: (g / count) as u8,

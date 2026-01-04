@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::{collections::{HashMap, HashSet}, path::PathBuf};
 
 mod ext;
 pub use ext::UiExt;
@@ -19,7 +20,7 @@ pub struct WFBuddy {
 
 impl WFBuddy {
 	pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-		let mut config = crate::config();
+		let config = crate::config();
 
 		// Apply UI zoom (in addition to OS DPI scaling).
 		cc.egui_ctx.set_zoom_factor(config.ui_zoom_factor);
@@ -28,12 +29,37 @@ impl WFBuddy {
 		let overlay = matches!(config.ui_mode, crate::config::UiMode::Overlay)
 			.then(|| OverlayController::new(config.overlay_click_through));
 
-		let data = data::Data::load(config.client_language);
+		// OCR model assets live in the workspace `ocr/` directory (sibling to the `wfbuddy/` crate).
+		fn ocr_path(file: &str) -> PathBuf {
+			let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+			p.pop(); // workspace root
+			p.push("ocr");
+			p.push(file);
+			p
+		}
+
+		let ie = Arc::new(ie::Ie::new(
+			config.theme,
+			ocr_path("detection.mnn"),
+			ocr_path("latin_recognition.mnn"),
+			ocr_path("latin_charset.txt"),
+		));
+
+		let data = data::Data::populated(config.client_language).unwrap_or_else(|err| {
+			eprintln!("[wfbuddy] Failed to load WF data: {err:#}");
+			data::Data {
+				id_manager: data::IdManager::new(),
+				platinum_values: HashMap::new(),
+				ducat_values: HashMap::new(),
+				relic_items: HashSet::new(),
+				vaulted_items: HashSet::new(),
+			}
+		});
 
 		let uniform = Arc::new(crate::UniformData {
-			iepol: crate::iepol::IePol::new(cc.egui_ctx.clone()),
+			iepol: crate::iepol::IePol::new(ie.clone()),
 			data,
-			ie: Arc::new(ie::Ie::new(config.theme, config.client_language)),
+			ie,
 		});
 
 		let modules: Vec<Box<dyn crate::module::Module>> = vec![
@@ -71,13 +97,6 @@ impl eframe::App for WFBuddy {
 	fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
 		// Apply overlay behavior (follow + click-through toggle).
 		if let Some(overlay) = &mut self.overlay {
-				// Runtime toggle: make overlay interactable / click-through.
-				if ctx.input(|i| i.key_pressed(egui::Key::F8)) {
-					let mut config = crate::config();
-					config.overlay_click_through = !config.overlay_click_through;
-					config.save();
-				}
-
 			let config = crate::config();
 			overlay.set_click_through(config.overlay_click_through);
 			let app_id = config.app_id.clone();
@@ -93,13 +112,13 @@ impl eframe::App for WFBuddy {
 		}
 
 		if self.is_overlay() {
-			egui::Area::new("overlay_root")
+			egui::Area::new(egui::Id::new("overlay_root"))
 				.fixed_pos(egui::pos2(12.0, 12.0))
 				.show(ctx, |ui| {
 					egui::Frame::default()
 						.fill(egui::Color32::from_black_alpha(128))
-						.rounding(6.0)
-						.inner_margin(egui::Margin::same(8.0))
+					.corner_radius(6)
+						.inner_margin(egui::Margin::same(8))
 						.show(ui, |ui| {
 							ui.horizontal(|ui| {
 								ui.label(crate::tr!("app-title"));
@@ -112,9 +131,9 @@ impl eframe::App for WFBuddy {
 								let click_through = crate::config().overlay_click_through;
 								ui.add_space(6.0);
 								ui.label(if click_through {
-									crate::tr!("label-overlay-clickthrough")
+									crate::tr!("overlay-status-clickthrough")
 								} else {
-									crate::tr!("hint-overlay-hotkey")
+									crate::tr!("overlay-status-interactive")
 								});
 							});
 

@@ -1,6 +1,10 @@
 use crate::Image;
+use std::sync::LazyLock;
 
-pub const DIGIT_REGEX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"(?<digits>\d+)").unwrap());
+// Regex is lazily compiled at runtime; this must be a `static` (not `const`) because
+// `LazyLock` has interior mutability.
+pub static DIGIT_REGEX: LazyLock<regex::Regex> =
+	LazyLock::new(|| regex::Regex::new(r"(?<digits>\d+)").unwrap());
 
 pub fn party_header_text_start(image: Image) -> (u32, u32) {
 	const AVATAR_START: u32 = 96;
