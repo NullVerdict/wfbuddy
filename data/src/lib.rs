@@ -1,156 +1,273 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+	collections::{HashMap, HashSet},
+	fs::File,
+	io::{BufReader, BufWriter, Write},
+	path::PathBuf,
+};
 
-mod structs;
-pub use structs::*;
-mod id;
-pub use id::*;
-mod droptable;
-mod publicexport;
-mod market;
+use anyhow::{Context, Result};
 
-// TODO: maybe function to get platinum value, which calls api if its old or only
-// has value from ducanator, and updates it
+mod schema;
 
+#[derive(Default)]
+struct EnrichedData {
+	relic_items: HashSet<String>,
+	vaulted_items: HashSet<String>,
+}
+
+fn enrich_with_public_export(game_ref_map: &HashMap<String, String>) -> Result<EnrichedData> {
+	let export = schema::publicexport::PublicExport::new_english()
+		.context("Load Warframe PublicExport manifest")?;
+
+	let mut res = ureq::get(&export.relic_arcane_url)
+		.call()
+		.with_context(|| format!("GET PublicExport RelicArcane {}", export.relic_arcane_url))?;
+	let relic_arcane = res
+		.body_mut()
+		.read_json::<schema::publicexport::relicarcane::RelicArcane>()
+		.context("Decode PublicExport RelicArcane JSON")?;
+
+	let droppable_relics = schema::droptable::fetch_relic_names().ok();
+	if droppable_relics.is_none() {
+		log::warn!("Could not fetch droptables; vaulted detection disabled");
+	}
+
+	let mut all_relic_names: HashSet<String> = HashSet::new();
+	let mut item_relics: HashMap<String, HashSet<String>> = HashMap::new();
+	let mut out = EnrichedData::default();
+
+	for v in relic_arcane.items {
+		let schema::publicexport::relicarcane::Item::Relic(relic) = v else {continue};
+		all_relic_names.insert(relic.name.clone());
+
+		for reward in relic.relic_rewards {
+			let Some(base_name) = game_ref_map.get(&reward.reward_name) else {continue};
+			out.relic_items.insert(base_name.clone());
+			item_relics.entry(base_name.clone()).or_default().insert(relic.name.clone());
+
+			// Some rewards are shown as "2 X ..." in the UI.
+			if reward.item_count > 1 {
+				let counted = format!("{} X {}", reward.item_count, base_name);
+				out.relic_items.insert(counted.clone());
+				item_relics.entry(counted).or_default().insert(relic.name.clone());
+			}
+		}
+	}
+
+	if let Some(droppable) = droppable_relics {
+		let vaulted_relics = all_relic_names
+			.into_iter()
+			.filter(|name| !droppable.contains(name))
+			.collect::<HashSet<_>>();
+
+		for (item_name, relics) in item_relics {
+			if relics.iter().all(|r| vaulted_relics.contains(r)) {
+				out.vaulted_items.insert(item_name);
+			}
+		}
+	}
+
+	Ok(out)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Data {
-	pub id_manager: IdManager,
-	
-	pub platinum_values: HashMap<Id, f32>,
-	pub ducat_values: HashMap<Id, u32>,
-	pub relic_items: HashSet<Id>,
-	pub vaulted_items: HashSet<Id>,
+	pub platinum_values: HashMap<String, f32>,
+	pub ducat_values: HashMap<String, u32>,
+	pub relic_items: HashSet<String>,
+	pub vaulted_items: HashSet<String>,
+}
+
+impl Default for Data {
+	fn default() -> Self {
+		let mut s = Self {
+			platinum_values: HashMap::new(),
+			ducat_values: HashMap::new(),
+			relic_items: HashSet::new(),
+			vaulted_items: HashSet::new(),
+		};
+
+		// Keep Forma in the dataset so the UI doesn’t special-case “missing data”.
+		// (The value is just a rough ducat-to-plat approximation; adjust if you want.)
+		s.platinum_values.insert("Forma Blueprint".to_string(), (350.0f32 / 3.0).floor() * 0.1);
+		s.relic_items.insert("Forma Blueprint".to_string());
+		s.platinum_values.insert("2 X Forma Blueprint".to_string(), (350.0f32 / 3.0).floor() * 0.2);
+		s.relic_items.insert("2 X Forma Blueprint".to_string());
+
+		s
+	}
 }
 
 impl Data {
-	pub fn populated(lang: Language) -> Result<Self, anyhow::Error> {
-		let mut idman = id::IdManager::new();
-		
-		let publicexport = publicexport::PublicExport::new(lang)?;
-		
-		// add all required locale
-		let resources = get::<publicexport::resources::Resources>(&publicexport.resources_url)?;
-		for v in &resources.resources {
-			idman.add_locale((lang, &v.name), &v.unique_name);
+	fn cache_path() -> Option<PathBuf> {
+		dirs::cache_dir().map(|p| p.join("WFBuddy").join("data_cache.json"))
+	}
+
+	fn load_cache() -> Result<Self> {
+		let path = Self::cache_path().context("No cache_dir available")?;
+		let file = File::open(&path).with_context(|| format!("Open cache {}", path.display()))?;
+		let reader = BufReader::new(file);
+		let data: Self = serde_json::from_reader(reader).with_context(|| format!("Parse cache {}", path.display()))?;
+		Ok(data)
+	}
+
+	fn save_cache(&self) -> Result<()> {
+		let Some(path) = Self::cache_path() else {
+			return Ok(());
+		};
+		if let Some(parent) = path.parent() {
+			std::fs::create_dir_all(parent).with_context(|| format!("Create cache dir {}", parent.display()))?;
 		}
-		
-		let warframes = get::<publicexport::warframes::Warframes>(&publicexport.warframes_url)?;
-		for v in &warframes.warframes {
-			idman.add_locale((lang, &v.name), &v.unique_name);
+
+		let tmp = path.with_extension("json.tmp");
+		let file = File::create(&tmp).with_context(|| format!("Write cache temp {}", tmp.display()))?;
+		let mut writer = BufWriter::new(file);
+		serde_json::to_writer(&mut writer, self).context("Serialize cache")?;
+		writer.flush().context("Flush cache")?;
+
+		// Replace existing file (Windows-friendly).
+		if std::fs::rename(&tmp, &path).is_err() {
+			let _ = std::fs::remove_file(&path);
+			std::fs::rename(&tmp, &path).with_context(|| format!("Persist cache {}", path.display()))?;
 		}
-		
-		let weapons = get::<publicexport::weapons::Weapons>(&publicexport.weapons_url)?;
-		for v in &weapons.weapons {
-			idman.add_locale((lang, &v.name), &v.unique_name);
+		Ok(())
+	}
+
+	fn fetch_remote() -> Result<Self> {
+		let mut res = ureq::get(schema::items::URL)
+			.call()
+			.context("GET items")?;
+		let items = res
+			.body_mut()
+			.read_json::<schema::items::Items>()
+			.context("Decode items JSON")?;
+
+		let mut res = ureq::get(schema::ducats::URL)
+			.call()
+			.context("GET ducats")?;
+		let ducats = res
+			.body_mut()
+			.read_json::<schema::ducats::Ducats>()
+			.context("Decode ducats JSON")?;
+
+		// Market item id -> English name
+		let name_map = items
+			.data
+			.iter()
+			.map(|v| (v.id.clone(), v.i18n.en.name.clone()))
+			.collect::<HashMap<_, _>>();
+		// In-game uniqueName ("gameRef") -> English name
+		let game_ref_map = items
+			.data
+			.iter()
+			.filter_map(|v| v.game_ref.as_ref().map(|gr| (gr.clone(), v.i18n.en.name.clone())))
+			.collect::<HashMap<_, _>>();
+
+		let mut s = Self {
+			platinum_values: HashMap::new(),
+			ducat_values: HashMap::new(),
+			relic_items: HashSet::new(),
+			vaulted_items: HashSet::new(),
+		};
+
+		for v in &ducats.payload.previous_hour {
+			let name = name_map
+				.get(&v.item)
+				.with_context(|| format!("Missing name for item id {}", v.item))?
+				.clone();
+			s.platinum_values.insert(name.clone(), v.wa_price);
+			s.ducat_values.insert(name.clone(), v.ducats);
+			s.relic_items.insert(name);
 		}
-		
-		let sentinels = get::<publicexport::sentinels::Sentinels>(&publicexport.sentinels_url)?;
-		for v in &sentinels.sentinels {
-			idman.add_locale((lang, &v.name), &v.unique_name);
-		}
-		
-		// blueprint locale
-		let recipes = get::<publicexport::recipes::Recipes>(&publicexport.recipes_url)?;
-		for recipe in &recipes.recipes {
-			let Some(result_locale) = idman.get_locale_from_gamename(lang, &recipe.result_type) else {println!("[BlueprintLocale] No id found for {}", recipe.result_type); continue};
-			let locale = lang.blueprint_name(result_locale);
-			println!("[BlueprintLocale] Register {} = {locale}", recipe.unique_name);
-			idman.add_locale((lang, &locale), &recipe.unique_name);
-		}
-		
+
+		// Best-effort: enrich the dataset with relic reward names (not only the ducat feed)
+		// and infer which items are vaulted using the official droptables page.
 		//
-		let relicarcane = get::<publicexport::relicarcane::RelicArcane>(&publicexport.relic_arcane_url)?;
-		let mut relic_items = HashSet::new();
-		
-		for v in &relicarcane.items {
-			let publicexport::relicarcane::Item::Relic(relic) = v else {continue};
-			idman.add_locale((lang, &relic.name), &relic.unique_name);
-			for reward in &relic.relic_rewards {
-				let Some(id) = idman.get_id_from_gamename(&reward.reward_name) else {println!("[RelicItem] No id found for {}", reward.reward_name); continue};
-				relic_items.insert(id);
+		// If any of these calls fail, we still return the market data above.
+		match enrich_with_public_export(&game_ref_map) {
+			Ok(enriched) => {
+				s.relic_items.extend(enriched.relic_items);
+				s.vaulted_items.extend(enriched.vaulted_items);
+			}
+			Err(err) => {
+				log::warn!("Failed to enrich dataset with PublicExport/droptables: {err:#}");
 			}
 		}
-		
-		//
-		let droptable = droptable::Droptable::downloaded(&mut idman)?;
-		let mut vaulted_items = HashSet::new();
-		let mut item_relics = HashMap::new();
-		
-		for v in relicarcane.items {
-			let publicexport::relicarcane::Item::Relic(relic) = v else {continue};
-			let relic_id = idman.get_id_from_gamename(&relic.unique_name).unwrap();
-			if !droptable.contains_id(&relic_id) {
-				vaulted_items.insert(relic_id);
+
+		// Ensure Forma entries exist even if the remote feed changes.
+		let mut out = Self::default();
+		out.platinum_values.extend(s.platinum_values);
+		out.ducat_values.extend(s.ducat_values);
+		out.relic_items.extend(s.relic_items);
+		out.vaulted_items.extend(s.vaulted_items);
+		Ok(out)
+	}
+
+	/// Fetch data from the network; if it fails, fall back to a cached copy (if available).
+	pub fn try_populated() -> Result<Self> {
+		match Self::fetch_remote() {
+			Ok(data) => {
+				let _ = data.save_cache();
+				Ok(data)
 			}
-			
-			for reward in &relic.relic_rewards {
-				let Some(id) = idman.get_id_from_gamename(&reward.reward_name) else {continue};
-				item_relics.entry(id).or_insert_with(Vec::new).push(relic_id);
-			}
-		}
-		
-		'o: for (item, relics) in item_relics {
-			for relic in relics {
-				if !vaulted_items.contains(&relic) {
-					continue 'o;
+			Err(err) => {
+				if let Ok(cached) = Self::load_cache() {
+					log::warn!("Using cached market data due to network error: {err:#}");
+					Ok(cached)
+				} else {
+					Err(err)
 				}
 			}
-			
-			vaulted_items.insert(item);
 		}
-		
-		// droptable is english localized names, so we gotta add enlgish relic locales to translate it
-		if lang != Language::English {
-			let publicexport = publicexport::PublicExport::new(Language::English)?;
-			let relicarcane = get::<publicexport::relicarcane::RelicArcane>(&publicexport.relic_arcane_url)?;
-			for v in relicarcane.items {
-				let publicexport::relicarcane::Item::Relic(relic) = v else {continue};
-				idman.add_locale_en(relic.name, relic.unique_name);
+	}
+
+	/// Backwards compatible helper: never errors (uses empty defaults on failure).
+	pub fn populated() -> Self {
+		Self::try_populated().unwrap_or_else(|err| {
+			log::warn!("Failed to load market data (no cache): {err:#}");
+			Self::default()
+		})
+	}
+
+	/// Attempts to find the closest item name from a dirty ocr string
+	pub fn find_item_name(&self, name: &str) -> String {
+		let name = name.trim_ascii();
+		// When OCR returns an empty/near-empty string, *don't* guess.
+		// The old behavior (Levenshtein over all items) tends to pick the shortest
+		// item name (often "Bo Prime Set"), which makes the UI look "stuck".
+		if name.len() < 3 {
+			return "(unreadable)".to_string();
+		}
+		if self.relic_items.contains(name) {
+			return name.to_owned();
+		}
+
+		let mut start = 0;
+		while let Some(index) = name[start..].find(' ') {
+			start += index + 1;
+			let sub = &name[start..];
+			if self.relic_items.contains(sub) {
+				return sub.to_owned();
 			}
 		}
-		
-		//
-		let market_items = get::<market::items::Items>(market::items::URL)?;
-		let market_ducats = get::<market::ducats::Ducats>(market::ducats::URL)?;
-		let mut market_id_map = HashMap::new();
-		for v in &market_items.data {
-			let Some(id) = idman.get_id_from_gamename(&v.game_ref) else {println!("[WFMarket] No id found for {}", v.game_ref); continue};
-			market_id_map.insert(v.id.clone(), id);
-		}
-		
-		let mut s = Self {
-			platinum_values: market_ducats.payload.previous_hour
-				.iter()
-				.filter_map(|v| market_id_map.get(&v.item).map(|id| (*id, v.wa_price)))
-				.collect(),
-			
-			ducat_values: market_ducats.payload.previous_hour
-				.iter()
-				.filter_map(|v| market_id_map.get(&v.item).map(|id| (*id, v.ducats)))
-				.collect(),
-			
-			relic_items,
-			vaulted_items,
-			id_manager: idman,
-		};
-		
-		s.platinum_values.insert(s.id_manager.get_id_from_gamename("/Lotus/StoreItems/Types/Recipes/Components/FormaBlueprint").unwrap(), (350.0f32 / 3.0).floor() * 0.1);
-		
-		// println!("{:#?}", s.vaulted_items);
-		// for id in &s.vaulted_items {
-		// 	println!("vaulted: {}", s.id_manager.get_en_from_id(*id).unwrap());
-		// }
-		
-		Ok(s)
-	}
-	
-	/// Attempts to find the closest item name from a dirty ocr string
-	pub fn find_item_name<'a, 'b>(&'a self, name: impl Into<Name<'b>>) -> &'a str {
-		self.id_manager.get_closest_match(name)
-	}
-}
 
-fn get<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, anyhow::Error> {
-	Ok(ureq::get(url)
-		.call()?
-		.body_mut()
-		.read_json::<T>()?)
+		let mut min_name = name;
+		let mut min = usize::MAX;
+		for item_name in self.relic_items.iter() {
+			let lev = levenshtein::levenshtein(name, item_name);
+			if lev < min {
+				min_name = item_name.as_str();
+				min = lev;
+			}
+		}
+
+		// If the best match is still very far away, show the raw OCR text
+		// so it's obvious OCR failed instead of silently "guessing".
+		let max_len = name.len().max(min_name.len());
+		if min > (max_len / 2).max(3) {
+			return format!("{name}?");
+		}
+
+		min_name.to_string()
+	}
 }

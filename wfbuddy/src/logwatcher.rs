@@ -53,7 +53,7 @@ impl LogWatcher {
 					if len == 0 {continue}
 					
 					if len < position {
-						println!("reset log position {len} {position}");
+						log::info!("reset log position {len} {position}");
 						position = 0;
 					}
 					
@@ -62,7 +62,7 @@ impl LogWatcher {
 					let read_count = f.read_to_end(&mut buf)?;
 					position += read_count as u64;
 					let Ok(s) = str::from_utf8(&buf[..read_count]) else {
-						println!("Failed converting read data into string");
+						log::warn!("Failed converting read data into string");
 						continue;
 					};
 					
@@ -83,7 +83,7 @@ impl LogWatcher {
 							let estimated_start = Instant::now() - offset_duration;
 							if estimated_start < start {
 								start = estimated_start;
-								println!("new estimated start {start:?}");
+								log::debug!("new estimated start {start:?}");
 							}
 							
 							for (regex, wtx) in watching.iter() {
@@ -106,7 +106,7 @@ impl LogWatcher {
 					std::thread::sleep(Duration::from_millis(MIN_DELAY_MS));
 				}
 				
-				println!("ending watch");
+				log::info!("ending watch");
 				
 				Ok(())
 			})

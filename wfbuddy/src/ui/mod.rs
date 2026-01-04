@@ -1,230 +1,141 @@
-use crate::{
-	iepol::IePol,
-	module::{self, Module},
-};
+use crate::{iepol::IePol, module::{self, Module}};
+use std::time::Duration;
 
 mod ext;
 pub use ext::UiExt;
-
-#[derive(Debug, Clone, Copy)]
-pub struct OverlayPlacement {
-	pub pos: egui::Pos2,
-	pub size: egui::Vec2,
-}
 mod settings;
+
+/// A tiny fallback UI shown when we fail to initialize the real app (e.g. OCR models missing).
+///
+/// This avoids crashing or silently exiting when the binary is launched from Explorer.
+pub struct ErrorApp {
+	message: String,
+}
+
+impl ErrorApp {
+	pub fn new(err: anyhow::Error) -> Self {
+		Self {
+			message: format!(
+				"WFBuddy failed to start.\n\n{:#}\n\n\
+Fix:\n  • Ensure the 'ocr/' folder is next to the executable\n  • or set WFBUDDY_ASSETS_DIR to the assets directory",
+				err
+			),
+		}
+	}
+}
+
+impl eframe::App for ErrorApp {
+	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+		egui::CentralPanel::default().show(ctx, |ui| {
+			ui.heading("Startup error");
+			ui.separator();
+			egui::ScrollArea::vertical().show(ui, |ui| {
+				ui.add(
+					egui::TextEdit::multiline(&mut self.message)
+						.font(egui::TextStyle::Monospace)
+						.desired_rows(20)
+						.lock_focus(true)
+						.cursor_at_end(true),
+				);
+			});
+		});
+	}
+}
 
 pub struct WFBuddy {
 	modules: Vec<Box<dyn Module>>,
 	uniform: crate::Uniform,
-	tab: &'static str,
+	tab: Tab,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tab {
+	Home,
+	Settings,
+	Module(usize),
 }
 
 impl WFBuddy {
-	pub fn new(_cc: &eframe::CreationContext) -> Self {
-		let lang = crate::config().client_language;
-		let ocr_code = lang.ocr_code();
-		let ie = std::sync::Arc::new(ie::Ie::new(
-			crate::config().theme,
-			"ocr/detection.mnn",
-			format!("ocr/{ocr_code}_recognition.mnn"),
-			format!("ocr/{ocr_code}_charset.txt"),
-		));
-
+	pub fn try_new(_cc: &eframe::CreationContext) -> anyhow::Result<Self> {
+		// Lock the config once.
+		let cfg = crate::config_read().clone();
+		let lang = cfg.client_language.ocr_code();
+		let assets = crate::util::resolve_ocr_assets(lang)?;
+		let ie = std::sync::Arc::new(ie::Ie::try_new(
+			cfg.theme,
+			assets.detection,
+			assets.recognition,
+			assets.charset,
+		)?);
 		let uniform = std::sync::Arc::new(crate::UniformData {
 			iepol: IePol::new(ie.clone()),
-			data: data::Data::populated(lang).unwrap(),
+			data: data::Data::try_populated().unwrap_or_else(|err| {
+				log::warn!("Failed to load market data: {err:#}");
+				data::Data::default()
+			}),
 			ie,
 		});
-
-		Self {
+		
+		Ok(Self {
 			modules: vec![
 				Box::new(module::RelicReward::new(uniform.clone())),
 				Box::new(module::Debug::new(uniform.clone())),
 			],
 			uniform,
-			tab: "Home",
-		}
+			tab: Tab::Home,
+		})
 	}
-
+	
 	fn ui(&mut self, ui: &mut egui::Ui) {
-		ui.label(format!(
-			"Seconds till next poll: {}",
-			self.uniform.iepol.secs_till_next_poll()
-		));
-
+		ui.label(format!("Seconds till next poll: {}", self.uniform.iepol.secs_till_next_poll()));
+		
 		ui.horizontal(|ui| {
-			if ui.selectable_label(self.tab == "Home", "Home").clicked() {
-				self.tab = "Home";
+			if ui.selectable_label(self.tab == Tab::Home, "Home").clicked() {
+				self.tab = Tab::Home;
 			}
-
-			if ui.selectable_label(self.tab == "Settings", "Settings").clicked() {
-				self.tab = "Settings";
+			if ui.selectable_label(self.tab == Tab::Settings, "Settings").clicked() {
+				self.tab = Tab::Settings;
 			}
-
-			for module in &mut self.modules {
-				if ui.selectable_label(self.tab == module.name(), module.name()).clicked() {
-					self.tab = module.name();
+			for (i, module) in self.modules.iter_mut().enumerate() {
+				if ui.selectable_label(self.tab == Tab::Module(i), module.name()).clicked() {
+					self.tab = Tab::Module(i);
 				}
 			}
 		});
-
+		
 		ui.separator();
-
+		
 		match self.tab {
-			"Home" => {
+			Tab::Home => {
 				for module in &mut self.modules {
 					if module.ui_important(ui) {
 						ui.separator();
 					}
 				}
 			}
-
-			"Settings" => {
-				settings::ui(ui, &mut self.modules);
-			}
-
-			tab => {
-				for module in &mut self.modules {
-					if module.name() == tab {
-						module.ui(ui);
-						break;
-					}
+			Tab::Settings => settings::ui(ui, &mut self.modules),
+			Tab::Module(i) => {
+				if let Some(module) = self.modules.get_mut(i) {
+					module.ui(ui);
 				}
 			}
 		}
 	}
-
-	fn any_overlay_active(&mut self) -> bool {
-		self.modules.iter().any(|m| m.overlay_active())
-	}
-
-	fn first_overlay_placement(&self) -> Option<OverlayPlacement> {
-		self.modules
-			.iter()
-			.find_map(|m| if m.overlay_active() { m.overlay_placement() } else { None })
-	}
-
-	fn ui_overlay_panel(&mut self, ui: &mut egui::Ui) {
-		for module in &mut self.modules {
-			if module.overlay_active() {
-				module.ui_overlay(ui);
-				ui.separator();
-			}
-		}
-	}
-
-	fn show_overlay(&mut self, ctx: &egui::Context) {
-		let (enabled, passthrough, opacity, margin, attach_to_game, force_show, app_id) = {
-			let cfg = crate::config();
-			(
-				cfg.overlay_enabled,
-				cfg.overlay_mouse_passthrough,
-				cfg.overlay_opacity,
-				cfg.overlay_margin,
-				cfg.overlay_attach_to_game,
-				cfg.overlay_force_show,
-				cfg.app_id.clone(),
-			)
-		};
-
-		if !enabled {
-			return;
-		}
-		if !force_show && !self.any_overlay_active() {
-			return;
-		}
-
-		let bounds = if attach_to_game {
-			crate::capture::window_bounds(&app_id)
-		} else {
-			None
-		};
-
-		let placement = if attach_to_game { self.first_overlay_placement() } else { None };
-
-		// Create the viewport for the overlay. We use a dedicated viewport so it can sit on top of the game
-		// without requiring a separate "view mode" window.
-		let mut builder = egui::ViewportBuilder::default()
-			.with_title("WFBuddy Overlay")
-			.with_decorations(false)
-			.with_always_on_top()
-			.with_transparent(true)
-			.with_resizable(false)
-			.with_taskbar(false)
-			.with_active(false)
-			.with_mouse_passthrough(passthrough);
-
-		// Default size/position: small panel near the game window corner.
-		let default_size = egui::vec2(480.0, 280.0);
-		let default_pos = if let Some(b) = bounds {
-			// `window_bounds` coordinates are typically in physical pixels. Egui expects logical points.
-			egui::pos2(b.x / b.scale_factor + margin, b.y / b.scale_factor + margin)
-		} else {
-			egui::pos2(margin, margin)
-		};
-
-		let (pos, size) = if let Some(p) = placement {
-			(p.pos, p.size)
-		} else {
-			(default_pos, default_size)
-		};
-
-		builder = builder.with_position(pos).with_inner_size(size);
-
-		let overlay_id = egui::ViewportId::from_hash_of("wfbuddy_overlay");
-
-		ctx.show_viewport_immediate(overlay_id, builder, |overlay_ctx, class| {
-			// If multi-viewport isn't available for some reason, fall back to an embedded window.
-			if matches!(class, egui::ViewportClass::Embedded) {
-				egui::Window::new("WFBuddy Overlay")
-					.collapsible(false)
-					.resizable(true)
-					.show(ctx, |ui| self.ui_overlay_panel(ui));
-				return;
-			}
-
-			egui::CentralPanel::default()
-				.frame(egui::Frame::NONE)
-				.show(overlay_ctx, |ui| {
-					let alpha = (opacity.clamp(0.0, 1.0) * 255.0) as u8;
-					let frame = egui::Frame::NONE
-						.fill(egui::Color32::from_black_alpha(alpha))
-						.corner_radius(egui::CornerRadius::same(10))
-						.stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.fg_stroke.color))
-						.inner_margin(egui::Margin::same(10));
-
-					frame.show(ui, |ui| {
-						if force_show && !self.any_overlay_active() {
-							ui.label("Overlay test mode (no rewards detected yet).");
-							ui.separator();
-						}
-						self.ui_overlay_panel(ui);
-					});
-				});
-		});
-	}
-
 }
 
 impl eframe::App for WFBuddy {
 	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+		// Drive background processing.
 		for module in &mut self.modules {
 			module.tick();
 		}
-
+		
 		egui::CentralPanel::default().show(ctx, |ui| self.ui(ui));
-
-		// Drive the overlay after the main UI has updated.
-		self.show_overlay(ctx);
-
-		// https://github.com/emilk/egui/issues/5113
-		// https://github.com/emilk/egui/pull/7775
-		ctx.request_repaint();
-	}
-
-	fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-		// Keep the root window opaque by drawing a normal CentralPanel background,
-		// but allow overlay viewports to be transparent.
-		egui::Rgba::from_rgba_premultiplied(0.0, 0.0, 0.0, 0.0).to_array()
+		
+		// Avoid pegging a CPU core by repainting every frame.
+		// We repaint often enough to keep timers (poll countdown) responsive.
+		let secs = self.uniform.iepol.secs_till_next_poll();
+		let after = Duration::from_secs_f32(secs.clamp(0.05, 0.5));
+		ctx.request_repaint_after(after);
 	}
 }

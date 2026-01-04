@@ -24,3 +24,5 @@ levenshtein = "1.0.5"
 
 ie = {path = "../ie"}
 data = {path = "../data"}
+log = "0.4.28"
+env_logger = "0.11.8"

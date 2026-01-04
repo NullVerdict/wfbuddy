@@ -7,10 +7,13 @@ edition = "2024"
 name = "model_downloader"
 
 [dependencies]
+anyhow = "1.0.100"
 regex = "1.12.2"
 fast_image_resize = "5.4"
 # ocrs = "0.11"
 rten = {version = "0.22.1", default-features = false}
 serde = {version = "1.0.228", features = ["derive"]}
 png = "0.18"
-ocr-rs = {git = "https://github.com/zibo-chen/rust-paddle-ocr.git", rev = "2ef84ebbc1d07d8ea6296340e3c05496bd7dfe8e"}
+# Use the published crate so we can track the public API & upstream fixes.
+ocr-rs = "2.0.2"
+log = "0.4.28"

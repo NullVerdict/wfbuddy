@@ -18,7 +18,7 @@ impl super::Module for Debug {
 	fn ui(&mut self, ui: &mut egui::Ui) {
 		if ui.button("Party Header Text").clicked() {
 			let Some(image) = crate::capture::capture() else {return};
-			println!("{}", self.uniform.ie.util_party_header_text_scaled(image.as_image(), crate::config().wf_ui_scale));
+			println!("{}", self.uniform.ie.util_party_header_text(image.as_image()));
 		}
 	}
 }
