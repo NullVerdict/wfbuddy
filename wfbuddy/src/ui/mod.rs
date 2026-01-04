@@ -163,15 +163,15 @@ impl WFBuddy {
 				}
 			}
 
-			egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
+			egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
 				ui.horizontal(|ui| {
 					ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
 					for card in cards {
-						let frame = egui::Frame::none()
+						let frame = egui::Frame::NONE
 							.fill(egui::Color32::from_black_alpha(120))
 							.stroke(ui.visuals().window_stroke)
-							.rounding(egui::Rounding::same(10.0))
-							.inner_margin(egui::Margin::same(10.0));
+							.corner_radius(egui::CornerRadius::same(10))
+							.inner_margin(egui::Margin::same(10));
 						frame.show(ui, |ui| {
 							ui.set_min_width(210.0);
 							ui.label(egui::RichText::new(&card.name).strong());

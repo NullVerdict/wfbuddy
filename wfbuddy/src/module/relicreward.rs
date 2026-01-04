@@ -151,11 +151,11 @@ impl super::Module for RelicReward {
 					0.0
 				};
 
-				let frame = egui::Frame::none()
+				let frame = egui::Frame::NONE
 					.fill(egui::Color32::from_black_alpha(120))
 					.stroke(ui.visuals().window_stroke)
-					.rounding(egui::Rounding::same(10.0))
-					.inner_margin(egui::Margin::same(10.0));
+					.corner_radius(egui::CornerRadius::same(10))
+					.inner_margin(egui::Margin::same(10));
 
 				frame.show(ui, |ui| {
 					ui.set_min_width(210.0);
