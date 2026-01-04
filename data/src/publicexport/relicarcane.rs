@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 #[derive(serde::Deserialize)]
 pub struct RelicArcane {
 	#[serde(rename = "ExportRelicArcane")]

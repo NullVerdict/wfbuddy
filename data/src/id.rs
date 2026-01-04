@@ -10,6 +10,12 @@ pub struct IdManager {
 	map_gamename_en: HashMap<lasso::Spur, lasso::Spur>,
 }
 
+impl Default for IdManager {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl IdManager {
 	pub fn new() -> Self {
 		Self {
@@ -47,7 +53,9 @@ impl IdManager {
 	}
 	
 	pub fn get_id_from_en(&self, name: &str) -> Option<Id> {
-		self.map_en_gamename.get(&self.strings.get(convert_en(name))?).map(|v| *v)
+		self.map_en_gamename
+			.get(&self.strings.get(convert_en(name))?)
+			.copied()
 	}
 	
 	pub fn get_gamename_from_id(&self, id: Id) -> Option<&str> {

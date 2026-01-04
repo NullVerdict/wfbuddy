@@ -43,13 +43,13 @@ pub struct Rewards {
 static OWNED_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Owned:\s*([0-9]+)").unwrap());
 
 static ICON_COMMON: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {
-	OwnedImage::from_png_mask(include_bytes!("../../assets/common.png"), 220).unwrap()
+	OwnedImage::from_png_mask(include_bytes!("../asset/icon_common.png"), 220).unwrap()
 });
 static ICON_UNCOMMON: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {
-	OwnedImage::from_png_mask(include_bytes!("../../assets/uncommon.png"), 220).unwrap()
+	OwnedImage::from_png_mask(include_bytes!("../asset/icon_uncommon.png"), 220).unwrap()
 });
 static ICON_RARE: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {
-	OwnedImage::from_png_mask(include_bytes!("../../assets/rare.png"), 220).unwrap()
+	OwnedImage::from_png_mask(include_bytes!("../asset/icon_rare.png"), 220).unwrap()
 });
 
 const REFERENCE_HEIGHT: f32 = 1080.0;

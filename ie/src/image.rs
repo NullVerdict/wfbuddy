@@ -1,6 +1,7 @@
 pub struct OwnedMask(pub Vec<u8>);
 pub struct Mask<'a>(pub &'a [u8]);
 
+#[derive(Clone)]
 pub struct OwnedImage {
 	width: u32,
 	height: u32,
@@ -106,12 +107,12 @@ impl OwnedImage {
 		let mut dst =
 			fast_image_resize::images::Image::new(width, height, fast_image_resize::PixelType::U8x3);
 
-		let mut resizer = fast_image_resize::Resizer::new(
+		let mut resizer = fast_image_resize::Resizer::new();
+		let opts = fast_image_resize::ResizeOptions::new().resize_alg(
 			fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Lanczos3),
 		);
-
 		resizer
-			.resize(&src, &mut dst, None)
+			.resize(&src, &mut dst, &Some(opts))
 			.expect("image resize");
 
 		self.width = width;
@@ -338,6 +339,24 @@ impl<'a> Image<'a> {
 			g: (g / count) as u8,
 			b: (b / count) as u8,
 		}
+	}
+
+	/// Average pixel deviation from a single reference color.
+	///
+	/// This is useful for quickly checking whether a patch matches a theme color.
+	pub fn average_deviation(&self, other: Color) -> f32 {
+		let mut deviation = 0.0;
+		let mut count = 0u32;
+		for x in self.x1..self.x2 {
+			for y in self.y1..self.y2 {
+				deviation += self.pixel(x, y).deviation(other);
+				count += 1;
+			}
+		}
+		if count == 0 {
+			return 0.0;
+		}
+		deviation / count as f32
 	}
 	
 	pub fn average_color_masked(&self, mask: Mask) -> Color {
