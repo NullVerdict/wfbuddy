@@ -10,6 +10,7 @@ pub const OVERLAY_HEIGHT: f32 = 190.0;
 /// The relic reward cards row is detected on a 1080p capture where:
 ///   - REWARD_Y = 225
 ///   - REWARD_SIZE = 235
+///
 /// so the row bottom is at y = 460.
 /// We place the overlay top a small gap below that, then convert to a center anchor ratio.
 pub const OVERLAY_DEFAULT_Y_RATIO_BELOW_REWARDS: f32 = (460.0 + 18.0 + (OVERLAY_HEIGHT / 2.0)) / 1080.0;

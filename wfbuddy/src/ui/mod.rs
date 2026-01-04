@@ -142,8 +142,7 @@ impl WFBuddy {
 			ctx.set_style(style);
 
 			// Follow the game window (coordinates are in logical points).
-			if cfg.overlay_follow_game_window {
-				if let Some((x, y, w, h)) = game_rect {
+			if cfg.overlay_follow_game_window && let Some((x, y, w, h)) = game_rect {
 					let ppp = ctx.pixels_per_point();
 					let (x, y, w, h) = (
 						x as f32 / ppp,
@@ -161,7 +160,6 @@ impl WFBuddy {
 					py = py.clamp(y + margin, y + h - overlay_h - margin);
 					ctx.send_viewport_cmd(egui::viewport::ViewportCommand::OuterPosition(egui::pos2(px, py)));
 				}
-			}
 
 			egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
 				ui.horizontal(|ui| {

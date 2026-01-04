@@ -134,57 +134,7 @@ impl super::Module for RelicReward {
 		true
 	}
 
-	fn ui_overlay(&mut self, ui: &mut egui::Ui) -> bool {
-		let reward_count = self.current_rewards.len();
-		if reward_count == 0 {
-			return false;
-		}
-		let valued_forma = crate::config_read().relicreward_valuedforma;
 
-		// A compact "cards" layout similar to AlecaFrame.
-		ui.horizontal(|ui| {
-			ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
-			for reward in &self.current_rewards {
-				let plat = if !reward.name.contains("Forma Blueprint") || valued_forma {
-					reward.platinum
-				} else {
-					0.0
-				};
-
-				let frame = egui::Frame::NONE
-					.fill(egui::Color32::from_black_alpha(120))
-					.stroke(ui.visuals().window_stroke)
-					.corner_radius(egui::CornerRadius::same(10))
-					.inner_margin(egui::Margin::same(10));
-
-				frame.show(ui, |ui| {
-					ui.set_min_width(210.0);
-					ui.label(egui::RichText::new(&reward.name).strong());
-					ui.add_space(2.0);
-					ui.horizontal(|ui| {
-						ui.label(format!("{}p", plat));
-						ui.label("•");
-						ui.label(format!("{}d", reward.ducats));
-					});
-					if reward.owned > 0 {
-						let picked = self.selected_rewards.get(&reward.name).copied().unwrap_or(0);
-						ui.label(format!("Owned: {}", reward.owned + picked));
-					} else {
-						ui.label("");
-					}
-					ui.add_space(2.0);
-					ui.horizontal(|ui| {
-						if reward.vaulted {
-							ui.label(egui::RichText::new("Vaulted").strong());
-						} else {
-							ui.label(egui::RichText::new("Not vaulted").weak());
-						}
-					});
-				});
-			}
-		});
-		true
-	}
 
 	fn overlay_cards(&self) -> Vec<crate::overlay::OverlayCard> {
 		let valued_forma = crate::config_read().relicreward_valuedforma;
