@@ -116,6 +116,15 @@ impl<'a> Image<'a> {
 	pub fn height(&self) -> u32 {
 		self.y2 - self.y1
 	}
+
+	/// Get a pixel by *relative* coordinates within this view (0..width, 0..height).
+	///
+	/// Many internal routines work with relative coordinates; exposing this helper
+	/// keeps image views encapsulated while allowing fast access when needed.
+	#[inline(always)]
+	pub fn pixel_rel(&self, x: u32, y: u32) -> Color {
+		*self.pixel(self.x1 + x, self.y1 + y)
+	}
 	
 	#[inline(always)]
 	fn pixel(&self, x: u32, y: u32) -> &Color {

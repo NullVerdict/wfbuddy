@@ -152,13 +152,17 @@ fn reward_count(image: Image) -> u32 {
 			let mut sum = 0.0f32;
 			let mut count = 0u32;
 
-			for y in 0..sub.height().min(templ.height()) {
-				for x in 0..sub.width().min(templ.width()) {
-					if !mask.get(x, y) {
+			let w = templ.width().min(sub.width());
+			let h = templ.height().min(sub.height());
+			for y in 0..h {
+				for x in 0..w {
+					let i = (x + y * templ.width()) as usize;
+					let yes = ((mask.0[i / 8] >> (i % 8)) & 1) == 1;
+					if !yes {
 						continue;
 					}
-					let a = luma(sub.pixel(x, y));
-					let b = luma(templ.pixel(x, y));
+					let a = luma(sub.pixel_rel(x, y));
+					let b = luma(templ.pixel_rel(x, y));
 					sum += (a - b).abs();
 					count += 1;
 				}

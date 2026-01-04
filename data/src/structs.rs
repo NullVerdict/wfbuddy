@@ -31,20 +31,20 @@ impl<'a> Name<'a> {
 	}
 }
 
-impl<'a> Into<Name<'a>> for (crate::Language, &'a String) {
-	fn into(self) -> Name<'a> {
+impl<'a> From<(crate::Language, &'a String)> for Name<'a> {
+	fn from(val: (crate::Language, &'a String)) -> Self {
 		Name {
-			lang: self.0,
-			text: self.1,
+			lang: val.0,
+			text: val.1.as_str(),
 		}
 	}
 }
 
-impl<'a> Into<Name<'a>> for (crate::Language, &'a str) {
-	fn into(self) -> Name<'a> {
+impl<'a> From<(crate::Language, &'a str)> for Name<'a> {
+	fn from(val: (crate::Language, &'a str)) -> Self {
 		Name {
-			lang: self.0,
-			text: self.1,
+			lang: val.0,
+			text: val.1,
 		}
 	}
 }
