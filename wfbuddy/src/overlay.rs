@@ -79,8 +79,10 @@ impl OverlayController {
 				unsafe {
 					let mut pt = POINT::default();
 					let mut rect = RECT::default();
-					let cursor_ok = GetCursorPos(&mut pt).as_bool();
-					let rect_ok = GetWindowRect(hwnd, &mut rect).as_bool();
+					// In the `windows` crate these Win32 APIs are projected as `Result<()>`.
+					// Success is `Ok(())`, failure is `Err(...)`.
+					let cursor_ok = GetCursorPos(&mut pt).is_ok();
+					let rect_ok = GetWindowRect(hwnd, &mut rect).is_ok();
 					if cursor_ok && rect_ok {
 						let inside = pt.x >= rect.left && pt.x <= rect.right && pt.y >= rect.top && pt.y <= rect.bottom;
 						!inside

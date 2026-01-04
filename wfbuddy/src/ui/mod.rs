@@ -37,13 +37,14 @@ impl WFBuddy {
 			let mut candidates: Vec<PathBuf> = Vec::new();
 
 			// 1) Beside the executable: <exe-dir>/ocr
-			if let Ok(exe) = std::env::current_exe() {
-				if let Some(dir) = exe.parent() {
-					candidates.push(dir.join("ocr"));
-					// 2) One directory above (common if exe is in ./bin/)
-					if let Some(parent) = dir.parent() {
-						candidates.push(parent.join("ocr"));
-					}
+			if let Some(exe_dir) = std::env::current_exe()
+				.ok()
+				.and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
+			{
+				candidates.push(exe_dir.join("ocr"));
+				// 2) One directory above (common if exe is in ./bin/)
+				if let Some(parent) = exe_dir.parent() {
+					candidates.push(parent.join("ocr"));
 				}
 			}
 
@@ -177,10 +178,10 @@ impl eframe::App for WFBuddy {
 									self.overlay_show_settings = !self.overlay_show_settings;
 								}
 
-									let click_through = self
-										.overlay
-										.as_ref()
-										.map_or(false, OverlayController::click_through);
+								let click_through = self
+									.overlay
+									.as_ref()
+									.is_some_and(OverlayController::click_through);
 								ui.add_space(6.0);
 								ui.label(if click_through {
 									crate::tr!("overlay-status-clickthrough")
