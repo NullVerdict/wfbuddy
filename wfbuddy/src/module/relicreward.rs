@@ -157,7 +157,7 @@ impl super::Module for RelicReward {
 		}
 
 		ui.columns(reward_count.max(1), |uis| {
-			for (i, ui) in uis.into_iter().enumerate().take(reward_count) {
+			for (i, ui) in uis.iter_mut().enumerate().take(reward_count) {
 				let reward = &self.current_rewards[i];
 
 				ui.label(&reward.name);

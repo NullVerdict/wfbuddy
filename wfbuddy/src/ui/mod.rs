@@ -102,39 +102,53 @@ impl WFBuddy {
 	}
 
 	fn show_overlay(&mut self, ctx: &egui::Context) {
-		let (enabled, passthrough, opacity, margin, app_id) = {
+		let (enabled, passthrough, opacity, margin, attach_to_game, force_show, app_id) = {
 			let cfg = crate::config();
 			(
 				cfg.overlay_enabled,
 				cfg.overlay_mouse_passthrough,
 				cfg.overlay_opacity,
 				cfg.overlay_margin,
+				cfg.overlay_attach_to_game,
+				cfg.overlay_force_show,
 				cfg.app_id.clone(),
 			)
 		};
 
-		if !enabled || !self.any_overlay_active() {
+		if !enabled {
+			return;
+		}
+		if !force_show && !self.any_overlay_active() {
 			return;
 		}
 
-		let bounds = crate::capture::window_bounds(&app_id);
+		let bounds = if attach_to_game {
+			crate::capture::window_bounds(&app_id)
+		} else {
+			None
+		};
+
+		// Keep the overlay window small and focused. A full-size transparent window is fragile on some systems.
+		let overlay_size = egui::vec2(480.0, 280.0);
 
 		let mut builder = egui::ViewportBuilder::default()
 			.with_title("WFBuddy Overlay")
-			.with_decorations(false)
+			// When click-through is off, keep decorations so the user can move the overlay.
+			.with_decorations(!passthrough)
 			.with_always_on_top()
 			.with_transparent(true)
-			.with_resizable(false)
+			.with_resizable(!passthrough)
 			.with_taskbar(false)
-			.with_active(false)
 			.with_mouse_passthrough(passthrough);
 
-		// Position + size the overlay to match the game window.
-		if let Some(b) = bounds {
-			let pos = egui::pos2(b.x / b.scale_factor, b.y / b.scale_factor);
-			let size = egui::vec2(b.width / b.scale_factor, b.height / b.scale_factor);
-			builder = builder.with_position(pos).with_inner_size(size);
-		}
+		// Position relative to the game window when available, otherwise top-left of the screen.
+		let pos = if let Some(b) = bounds {
+			egui::pos2(b.x + margin, b.y + margin)
+		} else {
+			egui::pos2(margin, margin)
+		};
+
+		builder = builder.with_position(pos).with_inner_size(overlay_size);
 
 		let overlay_id = egui::ViewportId::from_hash_of("wfbuddy_overlay");
 
@@ -148,9 +162,8 @@ impl WFBuddy {
 				return;
 			}
 
-			egui::Area::new("wfbuddy_overlay_area".into())
-				.fixed_pos(egui::pos2(margin, margin))
-				.order(egui::Order::Foreground)
+			egui::CentralPanel::default()
+				.frame(egui::Frame::NONE)
 				.show(overlay_ctx, |ui| {
 					let alpha = (opacity.clamp(0.0, 1.0) * 255.0) as u8;
 					let frame = egui::Frame::NONE
@@ -159,10 +172,17 @@ impl WFBuddy {
 						.stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.fg_stroke.color))
 						.inner_margin(egui::Margin::same(10));
 
-					frame.show(ui, |ui| self.ui_overlay_panel(ui));
+					frame.show(ui, |ui| {
+						if force_show && !self.any_overlay_active() {
+							ui.label("Overlay test mode (no rewards detected yet).");
+							ui.separator();
+						}
+						self.ui_overlay_panel(ui);
+					});
 				});
 		});
 	}
+
 }
 
 impl eframe::App for WFBuddy {

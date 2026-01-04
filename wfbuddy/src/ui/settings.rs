@@ -9,12 +9,11 @@ pub fn ui(ui: &mut egui::Ui, modules: &mut [Box<dyn crate::module::Module>]) {
 			"Set Theme (Open the settings menu in Warframe with the submenu set to keyboard/mouse). Requires you to restart WFBuddy",
 		)
 		.clicked()
+		&& let Some(image) = crate::capture::capture_specific(&config.app_id)
 	{
-		if let Some(image) = crate::capture::capture_specific(&config.app_id) {
 			config.theme = ie::Theme::from_options(image.as_image());
 			changed = true;
 			println!("new theme: {:?}", config.theme);
-		}
 	}
 
 	changed |= ui.combo_cached(&mut config.app_id, "Warframe Window ID", || {
@@ -59,6 +58,13 @@ pub fn ui(ui: &mut egui::Ui, modules: &mut [Box<dyn crate::module::Module>]) {
 		.changed();
 	changed |= ui
 		.num_edit_range(&mut config.overlay_margin, "Overlay margin", 0.0..=200.0)
+		.changed();
+
+	changed |= ui
+		.checkbox(&mut config.overlay_attach_to_game, "Attach overlay to Warframe window (recommended)")
+		.changed();
+changed |= ui
+		.checkbox(&mut config.overlay_force_show, "Debug: force overlay to show (even without rewards)")
 		.changed();
 
 	for module in modules {

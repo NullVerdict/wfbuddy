@@ -23,6 +23,10 @@ pub struct Config {
 	pub overlay_opacity: f32,
 	/// Overlay margin from the top-left of the game window (in points).
 	pub overlay_margin: f32,
+	/// If true, position the overlay relative to the game window. If false, show it at the top-left of the screen.
+	pub overlay_attach_to_game: bool,
+	/// Debug: force the overlay to show even when no rewards are detected.
+	pub overlay_force_show: bool,
 	
 	pub relicreward_valuedforma: bool,
 }
@@ -64,6 +68,8 @@ impl Default for Config {
 			overlay_mouse_passthrough: true,
 			overlay_opacity: 0.65,
 			overlay_margin: 16.0,
+			overlay_attach_to_game: false,
+			overlay_force_show: false,
 			
 			relicreward_valuedforma: true,
 		}

@@ -7,7 +7,7 @@ pub struct OwnedCaptures {
 
 impl OwnedCaptures {
 	pub fn get(&self, index: usize) -> Option<&str> {
-		self.indexed.get(index).map(|v| v.as_ref().map(|v| v.as_str())).flatten()
+		self.indexed.get(index).and_then(|v| v.as_deref())
 	}
 	
 	pub fn name(&self, name: &str) -> Option<&str> {
