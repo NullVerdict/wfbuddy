@@ -5,11 +5,11 @@ pub fn ui(ui: &mut egui::Ui, modules: &mut [Box<dyn crate::module::Module>]) {
 	let mut changed = false;
 
 	// Theme sampling
-	if ui.button(crate::tr!("btn-set-theme")).clicked() {
-		if let Some(image) = crate::capture::capture_specific(&config.app_id) {
-			config.theme = ie::Theme::from_options(image.as_image());
-			changed = true;
-		}
+	if ui.button(crate::tr!("btn-set-theme")).clicked()
+		&& let Some(image) = crate::capture::capture_specific(&config.app_id)
+	{
+		config.theme = ie::Theme::from_options(image.as_image());
+		changed = true;
 	}
 
 	ui.separator();
@@ -90,7 +90,15 @@ pub fn ui(ui: &mut egui::Ui, modules: &mut [Box<dyn crate::module::Module>]) {
 	// Module settings
 	for module in modules {
 		ui.spacer();
-		changed |= module.ui_settings(ui, &mut config);
+		let mut module_changed = false;
+		egui::CollapsingHeader::new(module.name())
+			.default_open(false)
+			.show(ui, |ui| {
+				module.ui(ui);
+				ui.separator();
+				module_changed |= module.ui_settings(ui, &mut config);
+			});
+		changed |= module_changed;
 	}
 
 	if changed {

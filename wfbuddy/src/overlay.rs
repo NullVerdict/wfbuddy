@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 pub struct OverlayController {
 	last_sync: Instant,
 	click_through: bool,
-	applied_styles: bool,
+	last_effective_click_through: Option<bool>,
 }
 
 impl OverlayController {
@@ -17,7 +17,7 @@ impl OverlayController {
 		Self {
 			last_sync: Instant::now() - Duration::from_secs(10),
 			click_through,
-			applied_styles: false,
+			last_effective_click_through: None,
 		}
 	}
 
@@ -28,7 +28,7 @@ impl OverlayController {
 	pub fn set_click_through(&mut self, click_through: bool) {
 		if self.click_through != click_through {
 			self.click_through = click_through;
-			self.applied_styles = false;
+			self.last_effective_click_through = None;
 		}
 	}
 
@@ -60,26 +60,47 @@ impl OverlayController {
 	fn apply_platform_styles(&mut self, frame: &mut eframe::Frame) {
 		#[cfg(windows)]
 		{
-			if self.applied_styles {
-				return;
-			}
-
 			use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+			use windows::Win32::Foundation::{HWND, POINT, RECT};
 			use windows::Win32::UI::WindowsAndMessaging::{
-				GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWL_EXSTYLE,
-				LWA_ALPHA, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+				GetCursorPos, GetWindowLongPtrW, GetWindowRect, SetLayeredWindowAttributes,
+				SetWindowLongPtrW, GWL_EXSTYLE, LWA_ALPHA, WS_EX_LAYERED, WS_EX_TRANSPARENT,
 			};
 
 			let hwnd = match frame.window_handle().ok().map(|h| h.as_raw()) {
-				Some(RawWindowHandle::Win32(h)) => windows::Win32::Foundation::HWND(h.hwnd.get() as _),
+				Some(RawWindowHandle::Win32(h)) => HWND(h.hwnd.get() as _),
 				_ => return,
 			};
+
+			// IMPORTANT: When `WS_EX_TRANSPARENT` is set, the window stops receiving mouse
+			// events. To allow users to interact without hotkeys, we make the overlay
+			// temporarily interactive when the cursor is over it.
+			let effective_click_through = if self.click_through {
+				unsafe {
+					let mut pt = POINT::default();
+					let mut rect = RECT::default();
+					let cursor_ok = GetCursorPos(&mut pt).as_bool();
+					let rect_ok = GetWindowRect(hwnd, &mut rect).as_bool();
+					if cursor_ok && rect_ok {
+						let inside = pt.x >= rect.left && pt.x <= rect.right && pt.y >= rect.top && pt.y <= rect.bottom;
+						!inside
+					} else {
+						true
+					}
+				}
+			} else {
+				false
+			};
+
+			if self.last_effective_click_through == Some(effective_click_through) {
+				return;
+			}
 
 			unsafe {
 				let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
 				ex_style |= WS_EX_LAYERED.0 as u32;
 
-				if self.click_through {
+				if effective_click_through {
 					ex_style |= WS_EX_TRANSPARENT.0 as u32;
 				} else {
 					ex_style &= !(WS_EX_TRANSPARENT.0 as u32);
@@ -92,13 +113,13 @@ impl OverlayController {
 				_ = SetLayeredWindowAttributes(hwnd, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
 			}
 
-			self.applied_styles = true;
+			self.last_effective_click_through = Some(effective_click_through);
 		}
 
 		#[cfg(not(windows))]
 		{
 			let _ = frame;
-			self.applied_styles = true;
+			self.last_effective_click_through = Some(false);
 		}
 	}
 }

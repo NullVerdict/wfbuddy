@@ -31,4 +31,12 @@ impl Ie {
 	pub fn relicreward_get_selected(&self, image: Image) -> u32 {
 		screen::relicreward::get_selected(image, self.theme)
 	}
+
+	pub fn ocr_available(&self) -> bool {
+		self.ocr.is_available()
+	}
+
+	pub fn ocr_init_error(&self) -> Option<&str> {
+		self.ocr.init_error()
+	}
 }

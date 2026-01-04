@@ -3,17 +3,12 @@ use serde::{Deserialize, Serialize};
 
 
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UiMode {
+	#[default]
 	Window,
 	Overlay,
-}
-
-impl Default for UiMode {
-	fn default() -> Self {
-		Self::Window
-	}
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

@@ -14,7 +14,7 @@ label-window-mode = Window mode
 mode-window = Window
 mode-overlay = Overlay
 label-overlay-clickthrough = Click-through overlay
-overlay-status-clickthrough = Click-through
+overlay-status-clickthrough = Click-through (hover to interact)
 overlay-status-interactive = Interactive
 hint-overlay-clickthrough = If enabled, the overlay won’t accept clicks. Disable it to open settings.
 
@@ -22,3 +22,5 @@ btn-set-theme = Set Theme (open Warframe settings with the submenu set to keyboa
 label-warframe-window = Warframe Window ID
 label-poll-delay = Screenshot polling delay
 note-restart-required = Restart required for this change
+
+ocr-missing = OCR is disabled (models not found).

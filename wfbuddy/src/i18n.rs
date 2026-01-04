@@ -15,7 +15,7 @@ static LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| fluent_language
 
 /// Access the global language loader (used by `tr!()`).
 pub fn loader() -> &'static FluentLanguageLoader {
-	&*LOADER
+	&LOADER
 }
 
 /// Initialize localization. If `forced_locale` is provided, it is preferred over the system locale.

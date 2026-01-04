@@ -29,21 +29,60 @@ impl WFBuddy {
 		let overlay = matches!(config.ui_mode, crate::config::UiMode::Overlay)
 			.then(|| OverlayController::new(config.overlay_click_through));
 
-		// OCR model assets live in the workspace `ocr/` directory (sibling to the `wfbuddy/` crate).
-		fn ocr_path(file: &str) -> PathBuf {
-			let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-			p.pop(); // workspace root
-			p.push("ocr");
-			p.push(file);
-			p
+		// Locate OCR model assets at *runtime*.
+		//
+		// IMPORTANT: `env!("CARGO_MANIFEST_DIR")` is a compile-time path (it points to the build machine),
+		// so it must not be used for runtime asset resolution in release builds.
+		fn locate_ocr_dir() -> Option<PathBuf> {
+			let mut candidates: Vec<PathBuf> = Vec::new();
+
+			// 1) Beside the executable: <exe-dir>/ocr
+			if let Ok(exe) = std::env::current_exe() {
+				if let Some(dir) = exe.parent() {
+					candidates.push(dir.join("ocr"));
+					// 2) One directory above (common if exe is in ./bin/)
+					if let Some(parent) = dir.parent() {
+						candidates.push(parent.join("ocr"));
+					}
+				}
+			}
+
+			// 3) Current working directory: ./ocr
+			if let Ok(cwd) = std::env::current_dir() {
+				candidates.push(cwd.join("ocr"));
+			}
+
+			// 4) Config directory: <config>/WFBuddy/ocr
+			if let Some(cfg) = dirs::config_dir() {
+				candidates.push(cfg.join("WFBuddy").join("ocr"));
+			}
+
+			candidates.into_iter().find(|p| {
+				p.join("detection.mnn").is_file()
+					&& p.join("latin_recognition.mnn").is_file()
+					&& p.join("latin_charset.txt").is_file()
+			})
 		}
 
-		let ie = Arc::new(ie::Ie::new(
-			config.theme,
-			ocr_path("detection.mnn"),
-			ocr_path("latin_recognition.mnn"),
-			ocr_path("latin_charset.txt"),
-		));
+		let ie = {
+			let ocr_dir = locate_ocr_dir();
+			let (det, rec, charset) = if let Some(dir) = &ocr_dir {
+				(
+					dir.join("detection.mnn"),
+					dir.join("latin_recognition.mnn"),
+					dir.join("latin_charset.txt"),
+				)
+			} else {
+				// Pass obviously-invalid paths; the `ie` crate will gracefully disable OCR and surface the error.
+				(
+					PathBuf::from("missing-ocr-detection.mnn"),
+					PathBuf::from("missing-ocr-recognition.mnn"),
+					PathBuf::from("missing-ocr-charset.txt"),
+				)
+			};
+
+			Arc::new(ie::Ie::new(config.theme, det, rec, charset))
+		};
 
 		let data = data::Data::populated(config.client_language).unwrap_or_else(|err| {
 			eprintln!("[wfbuddy] Failed to load WF data: {err:#}");
@@ -79,6 +118,16 @@ impl WFBuddy {
 	}
 
 	fn ui_home(&mut self, ui: &mut egui::Ui) {
+			if !self.uniform.ie.ocr_available() {
+				ui.group(|ui| {
+					ui.label(egui::RichText::new(crate::tr!("ocr-missing")).strong());
+					if let Some(err) = self.uniform.ie.ocr_init_error() {
+						ui.add_space(4.0);
+						ui.small(err);
+					}
+				});
+				ui.add_space(6.0);
+			}
 		for module in &mut self.modules {
 			module.ui_important(ui);
 		}
@@ -117,7 +166,7 @@ impl eframe::App for WFBuddy {
 				.show(ctx, |ui| {
 					egui::Frame::default()
 						.fill(egui::Color32::from_black_alpha(128))
-					.corner_radius(6)
+						.corner_radius(egui::CornerRadius::same(6))
 						.inner_margin(egui::Margin::same(8))
 						.show(ui, |ui| {
 							ui.horizontal(|ui| {
@@ -128,7 +177,10 @@ impl eframe::App for WFBuddy {
 									self.overlay_show_settings = !self.overlay_show_settings;
 								}
 
-								let click_through = crate::config().overlay_click_through;
+									let click_through = self
+										.overlay
+										.as_ref()
+										.map_or(false, OverlayController::click_through);
 								ui.add_space(6.0);
 								ui.label(if click_through {
 									crate::tr!("overlay-status-clickthrough")
