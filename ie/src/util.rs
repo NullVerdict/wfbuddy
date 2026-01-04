@@ -1,6 +1,8 @@
 use crate::{Image, Theme};
 
-pub const DIGIT_REGEX: std::sync::LazyLock<regex::Regex> =
+// `LazyLock` has interior mutability, so it must be a `static` (not a `const`) to satisfy clippy
+// under `-D warnings`.
+pub static DIGIT_REGEX: std::sync::LazyLock<regex::Regex> =
 	std::sync::LazyLock::new(|| regex::Regex::new(r"(?<digits>\d+)").unwrap());
 
 const BASE_HEIGHT: f32 = 1080.0;
@@ -59,6 +61,7 @@ pub fn party_header_text_start_scaled(image: Image, ui_scale: f32) -> (u32, u32)
 	)
 }
 
+#[allow(dead_code)]
 pub fn party_header_text_start(image: Image) -> (u32, u32) {
 	party_header_text_start_scaled(image, 1.0)
 }
@@ -82,6 +85,27 @@ pub fn party_header_text_scaled(
 		.get_text(theme, ocr)
 }
 
+#[allow(dead_code)]
 pub fn party_header_text(image: Image, theme: Theme, ocr: &crate::ocr::Ocr) -> String {
 	party_header_text_scaled(image, theme, ocr, 1.0)
+}
+
+// These convenience wrappers are kept for API compatibility with older callers.
+// They may be unused in some builds, but we compile with `-D warnings`.
+#[allow(dead_code)]
+pub fn _party_header_text_start_compat(image: Image) -> (u32, u32) {
+	party_header_text_start(image)
+}
+
+#[allow(dead_code)]
+pub fn _party_header_text_compat(image: Image, theme: Theme, ocr: &crate::ocr::Ocr) -> String {
+	party_header_text(image, theme, ocr)
+}
+
+// These convenience wrappers are intentionally kept for callers that don't care about UI scaling.
+// They are not used in this crate directly, so silence `dead_code` when building with `-D warnings`.
+#[allow(dead_code)]
+fn _keep_party_header_wrappers() {
+	let _ = party_header_text_start as fn(Image) -> (u32, u32);
+	let _ = party_header_text as fn(Image, Theme, &crate::ocr::Ocr) -> String;
 }

@@ -161,7 +161,7 @@ fn reward_layout(image: Image, ui_scale: f32) -> RewardLayout {
 	let mut best_rarities: Vec<Rarity> = vec![Rarity::Common];
 
 	for candidate in 1..=4 {
-		let mut hits = 0;
+		let mut hits: i32 = 0;
 		let mut dev_sum = 0.0;
 		let mut rarities = Vec::with_capacity(candidate as usize);
 
@@ -178,13 +178,13 @@ fn reward_layout(image: Image, ui_scale: f32) -> RewardLayout {
 		let avg_dev = if hits > 0 { dev_sum / hits as f32 } else { f32::INFINITY };
 
 		// Prefer: more hits, then larger candidate (avoid "dropping" a slot), then lower deviation.
-		let better = (hits as i32 > best_hits)
-			|| (hits as i32 == best_hits && candidate > best_count)
-			|| (hits as i32 == best_hits && candidate == best_count && avg_dev < best_avg_dev);
+		let better = (hits > best_hits)
+			|| (hits == best_hits && candidate > best_count)
+			|| (hits == best_hits && candidate == best_count && avg_dev < best_avg_dev);
 
 		if better {
 			best_count = candidate;
-			best_hits = hits as i32;
+			best_hits = hits;
 			best_avg_dev = avg_dev;
 			best_rarities = rarities;
 		}
@@ -246,7 +246,7 @@ pub(crate) fn get_rewards(image: Image, theme: Theme, ocr: &Ocr, ui_scale: f32) 
 
 	let rewards = reward_images
 		.into_iter()
-		.zip(layout.rarities.into_iter())
+		.zip(layout.rarities)
 		.filter_map(|(reward_image, rarity)| {
 			let name = reward_image.trimmed_bottom(name_area).get_text(theme, ocr).trim().to_owned();
 			if name.is_empty() {

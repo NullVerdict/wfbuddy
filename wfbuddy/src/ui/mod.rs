@@ -148,16 +148,16 @@ impl WFBuddy {
 				return;
 			}
 
-			egui::Area::new("wfbuddy_overlay_area")
+			egui::Area::new("wfbuddy_overlay_area".into())
 				.fixed_pos(egui::pos2(margin, margin))
 				.order(egui::Order::Foreground)
 				.show(overlay_ctx, |ui| {
 					let alpha = (opacity.clamp(0.0, 1.0) * 255.0) as u8;
-					let frame = egui::Frame::none()
+					let frame = egui::Frame::NONE
 						.fill(egui::Color32::from_black_alpha(alpha))
-						.rounding(egui::Rounding::same(10.0))
+						.corner_radius(egui::CornerRadius::same(10))
 						.stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.fg_stroke.color))
-						.inner_margin(egui::Margin::same(10.0));
+						.inner_margin(egui::Margin::same(10));
 
 					frame.show(ui, |ui| self.ui_overlay_panel(ui));
 				});

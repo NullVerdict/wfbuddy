@@ -7,6 +7,8 @@ use crate::iepol::{EventReceiver, IePolWatchType};
 
 use ie::screen::relicreward::Rarity;
 
+use crate::ui::ext::UiExt;
+
 pub struct RelicReward {
 	uniform: crate::Uniform,
 
@@ -138,13 +140,13 @@ impl super::Module for RelicReward {
 			.clicked()
 	}
 
-	fn overlay_active(&mut self) -> bool {
+	fn overlay_active(&self) -> bool {
 		!self.current_rewards.is_empty()
 	}
 
-	fn ui_overlay(&mut self, ui: &mut egui::Ui) {
+	fn ui_overlay(&mut self, ui: &mut egui::Ui) -> bool {
 		// Reuse the important UI, but keep it compact.
-		self.ui_important(ui);
+		self.ui_important(ui)
 	}
 
 	fn ui_important(&mut self, ui: &mut egui::Ui) -> bool {
@@ -240,10 +242,6 @@ struct Reward {
 
 impl Reward {
 	fn rarity_label(&self) -> &'static str {
-		match self.rarity {
-			Rarity::Bronze => "Bronze",
-			Rarity::Silver => "Silver",
-			Rarity::Gold => "Gold",
-		}
+		self.rarity.label()
 	}
 }

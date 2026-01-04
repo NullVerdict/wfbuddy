@@ -10,7 +10,7 @@ pub struct OwnedImage {
 
 impl OwnedImage {
 	pub fn from_rgba(width: usize, bytes: &[u8]) -> Self {
-		let height = bytes.len() as usize / width / 4;
+		let height = bytes.len() / width / 4;
 		let data = bytes
 			.chunks_exact(4)
 			.map(|v| Color::new(v[0], v[1], v[2]))
@@ -30,7 +30,7 @@ impl OwnedImage {
 		let mut buf = vec![0u8; reader.output_buffer_size().ok_or("Png too big for this systems memory (how tf)")?];
 		let info = reader.next_frame(&mut buf)?;
 		let bytes = &buf[..info.buffer_size()];
-		let height = bytes.len() as usize / info.width as usize / 4;
+		let height = bytes.len() / info.width as usize / 4;
 		
 		let mut data = Vec::with_capacity(info.width as usize * height);
 		let mut mask = vec![0u8; info.width as usize * height / 8 + 1];
@@ -62,11 +62,13 @@ impl OwnedImage {
 		let mut resizer = fast_image_resize::Resizer::new();
 		resizer.resize(&img, &mut dst, &Some(fast_image_resize::ResizeOptions::new().resize_alg(fast_image_resize::ResizeAlg::Interpolation(fast_image_resize::FilterType::CatmullRom)))).unwrap();
 		
-		*self = Self {
-			width,
-			height,
-			data: unsafe{std::mem::transmute(dst.into_vec())},
-		}
+		let raw = dst.into_vec();
+		let data = raw
+			.chunks_exact(3)
+			.map(|v| Color::new(v[0], v[1], v[2]))
+			.collect::<Vec<_>>();
+
+		*self = Self { width, height, data }
 	}
 	
 	#[inline]
@@ -118,8 +120,11 @@ impl OwnedImage {
 		self.width = width;
 		self.height = height;
 
-		// SAFETY: destination pixel type is U8x3 (r,g,b) with identical layout to `Color`.
-		self.data = unsafe { std::mem::transmute(dst.into_vec()) };
+		let raw = dst.into_vec();
+		self.data = raw
+			.chunks_exact(3)
+			.map(|v| Color::new(v[0], v[1], v[2]))
+			.collect();
 	}
 
 	/// Return a resized copy of this image at an exact `width` x `height`.
@@ -333,7 +338,7 @@ impl<'a> Image<'a> {
 			}
 		}
 		
-		let count = (self.width() * self.height()) as u32;
+		let count = self.width() * self.height();
 		Color {
 			r: (r / count) as u8,
 			g: (g / count) as u8,
