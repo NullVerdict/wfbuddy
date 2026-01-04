@@ -1,6 +1,6 @@
 use crate::Image;
 
-pub const DIGIT_REGEX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"(?<digits>\d+)").unwrap());
+pub static DIGIT_REGEX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"(?<digits>\d+)").unwrap());
 
 pub fn party_header_text_start(image: Image) -> (u32, u32) {
 	const AVATAR_START: u32 = 96;
@@ -27,7 +27,7 @@ pub fn party_header_text_start(image: Image) -> (u32, u32) {
 		player_count = i + 1;
 	}
 	
-	println!("avatarcount is {player_count}");
+	log::debug!("avatarcount is {player_count}");
 	
 	(
 		AVATAR_START + (AVATAR_SIZE + AVATAR_SPACING) * player_count,
