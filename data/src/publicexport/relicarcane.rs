@@ -6,7 +6,6 @@ pub struct RelicArcane {
 
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
-#[allow(dead_code)]
 pub enum Item {
 	Relic(Relic),
 	Arcane(Arcane),
@@ -22,7 +21,6 @@ pub struct Relic {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct RelicReward {
 	pub reward_name: String,
 	pub item_count: i32,
@@ -30,7 +28,6 @@ pub struct RelicReward {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct Arcane {
 	pub unique_name: String,
 	pub name: String,

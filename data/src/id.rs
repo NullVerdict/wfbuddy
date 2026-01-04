@@ -47,7 +47,7 @@ impl IdManager {
 	}
 	
 	pub fn get_id_from_en(&self, name: &str) -> Option<Id> {
-		self.map_en_gamename.get(&self.strings.get(convert_en(name))?).copied()
+		self.map_en_gamename.get(&self.strings.get(convert_en(name))?).map(|v| *v)
 	}
 	
 	pub fn get_gamename_from_id(&self, id: Id) -> Option<&str> {
@@ -94,12 +94,6 @@ impl IdManager {
 		}
 		
 		min_name
-	}
-}
-
-impl Default for IdManager {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

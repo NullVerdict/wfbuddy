@@ -1,0 +1,22 @@
+app-title = WF Buddy
+tab-home = Home
+tab-settings = Settings
+section-important = Important
+btn-check = Check
+btn-selected = Selected
+btn-clear-selected = Clear Selected Rewards
+label-selected-rewards = Selected Rewards
+label-relic-rewards = Relic Rewards
+label-forma-value = Forma has value
+label-ui-scale = UI scale
+label-ui-language = UI language
+label-window-mode = Window mode
+mode-window = Window
+mode-overlay = Overlay
+label-overlay-clickthrough = Click-through overlay
+hint-overlay-hotkey = Press F8 to toggle overlay interaction
+
+btn-set-theme = Set Theme (open Warframe settings with the submenu set to keyboard/mouse). Restart required.
+label-warframe-window = Warframe Window ID
+label-poll-delay = Screenshot polling delay
+note-restart-required = Restart required for this change

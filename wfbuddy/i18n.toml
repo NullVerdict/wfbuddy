@@ -1,0 +1,8 @@
+# (Required) Primary fallback language.
+fallback_language = "en-US"
+
+# Use the fluent localization system.
+[fluent]
+# Paths inside this directory should be structured like:
+# `assets_dir/{language}/{domain}.ftl`
+assets_dir = "i18n"

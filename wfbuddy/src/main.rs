@@ -1,4 +1,4 @@
-use std::sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, LazyLock, Mutex};
 
 pub mod util;
 pub mod capture;
@@ -6,43 +6,44 @@ pub mod capture;
 mod iepol;
 mod module;
 mod ui;
+mod i18n;
+mod overlay;
 pub use ui::UiExt;
 mod config;
 
-pub type Uniform = std::sync::Arc<UniformData>;
-
+pub type Uniform = Arc<UniformData>;
 pub struct UniformData {
 	pub iepol: iepol::IePol,
 	pub data: data::Data,
-	pub ie: std::sync::Arc<ie::Ie>,
+	pub ie: Arc<ie::Ie>,
 }
 
-/// Global config.
-///
-/// We use an `RwLock` so background threads can read frequently while the UI
-/// writes rarely (settings changes).
-static CONFIG: LazyLock<RwLock<config::Config>> =
-	LazyLock::new(|| RwLock::new(config::Config::load()));
-
-pub fn config_read() -> RwLockReadGuard<'static, config::Config> {
-	CONFIG.read().expect("config lock poisoned")
+static CONFIG: LazyLock<Arc<Mutex<config::Config>>> = LazyLock::new(|| Arc::new(Mutex::new(config::Config::load())));
+pub fn config() -> std::sync::MutexGuard<'static, config::Config> {
+	CONFIG.lock().unwrap()
 }
 
-pub fn config_write() -> RwLockWriteGuard<'static, config::Config> {
-	CONFIG.write().expect("config lock poisoned")
-}
+fn main() {
+	// Load config early so we can configure localization and window options.
+	let cfg = config().clone();
+	i18n::init(Some(&cfg.ui_locale));
 
-fn main() -> eframe::Result {
-	// Logging is controlled via RUST_LOG (e.g. RUST_LOG=debug).
-	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+	let title = tr!("app-title").to_string();
 
-	let native_options = eframe::NativeOptions::default();
-	eframe::run_native(
-		"WFBuddy",
+	let mut native_options = eframe::NativeOptions::default();
+
+	// Configure overlay window behavior at startup (some options require restart).
+	if matches!(cfg.ui_mode, config::UiMode::Overlay) {
+		native_options.viewport = native_options
+			.viewport
+			.with_decorations(false)
+			.with_transparent(true)
+			.with_always_on_top(true);
+	}
+
+	let _ = eframe::run_native(
+		&title,
 		native_options,
-		Box::new(|cc| match ui::WFBuddy::try_new(cc) {
-			Ok(app) => Ok(Box::new(app) as Box<dyn eframe::App>),
-			Err(err) => Ok(Box::new(ui::ErrorApp::new(err)) as Box<dyn eframe::App>),
-		}),
-	)
+		Box::new(|cc| Ok(Box::new(ui::WFBuddy::new(cc)))),
+	);
 }

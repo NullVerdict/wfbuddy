@@ -16,11 +16,10 @@ impl Droptable {
 		let regex = regex::Regex::new(r"<tr><td>(?:</td><td>)?(?<name>[^<]+)</td>")?;
 		let caps = regex.captures_iter(&html);
 		let items = caps
-			.filter_map(|cap| {
-				cap.name("name")
-					.filter(|name| name.as_str().ends_with("Relic"))
-					.and_then(|name| idman.get_id_from_en(name.as_str()))
-			})
+			.filter_map(|cap| cap.name("name")
+				.filter(|name| name.as_str().ends_with("Relic"))
+				.map(|name| idman.get_id_from_en(name.as_str()))
+				.flatten())
 			.collect::<HashSet<_>>();
 		
 			Ok(Self{items})

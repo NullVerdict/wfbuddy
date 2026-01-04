@@ -83,7 +83,7 @@ impl Data {
 			
 			for reward in &relic.relic_rewards {
 				let Some(id) = idman.get_id_from_gamename(&reward.reward_name) else {continue};
-				item_relics.entry(id).or_insert_with(Vec::new).push(relic_id);
+				item_relics.entry(id).or_insert_with(|| Vec::new()).push(relic_id);
 			}
 		}
 		

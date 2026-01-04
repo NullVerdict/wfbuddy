@@ -5,9 +5,3 @@ members = [
 	"ie",
 	"data",
 ]
-
-[profile.release]
-# Optimize for release binaries distributed to end users.
-lto = "thin"
-codegen-units = 1
-panic = "abort"

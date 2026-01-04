@@ -1,138 +1,155 @@
-use crate::{iepol::IePol, module::{self, Module}};
-use std::time::Duration;
+use std::sync::Arc;
 
 mod ext;
 pub use ext::UiExt;
+
 mod settings;
 
-/// A tiny fallback UI shown when we fail to initialize the real app (e.g. OCR models missing).
-///
-/// This avoids crashing or silently exiting when the binary is launched from Explorer.
-pub struct ErrorApp {
-	message: String,
-}
-
-impl ErrorApp {
-	pub fn new(err: anyhow::Error) -> Self {
-		Self {
-			message: format!(
-				"WFBuddy failed to start.\n\n{:#}\n\n\
-Fix:\n  • Ensure the 'ocr/' folder is next to the executable\n  • or set WFBUDDY_ASSETS_DIR to the assets directory",
-				err
-			),
-		}
-	}
-}
-
-impl eframe::App for ErrorApp {
-	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-		egui::CentralPanel::default().show(ctx, |ui| {
-			ui.heading("Startup error");
-			ui.separator();
-			egui::ScrollArea::vertical().show(ui, |ui| {
-				ui.add(
-					egui::TextEdit::multiline(&mut self.message)
-						.font(egui::TextStyle::Monospace)
-						.desired_rows(20)
-						.lock_focus(true)
-						.cursor_at_end(true),
-				);
-			});
-		});
-	}
-}
+use crate::overlay::OverlayController;
 
 pub struct WFBuddy {
-	modules: Vec<Box<dyn Module>>,
 	uniform: crate::Uniform,
-	tab: Tab,
-}
+	modules: Vec<Box<dyn crate::module::Module>>,
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tab {
-	Home,
-	Settings,
-	Module(usize),
+	tab: Tab,
+
+	overlay: Option<OverlayController>,
+	overlay_show_settings: bool,
 }
 
 impl WFBuddy {
-	pub fn try_new(_cc: &eframe::CreationContext) -> anyhow::Result<Self> {
-		// Lock the config once.
-		let cfg = crate::config_read().clone();
-		let lang = cfg.client_language.ocr_code();
-		let assets = crate::util::resolve_ocr_assets(lang)?;
-		let ie = std::sync::Arc::new(ie::Ie::try_new(
-			cfg.theme,
-			assets.detection,
-			assets.recognition,
-			assets.charset,
-		)?);
-		let uniform = std::sync::Arc::new(crate::UniformData {
-			iepol: IePol::new(ie.clone()),
-			data: data::Data::populated(cfg.client_language)?,
-			ie,
+	pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+		let mut config = crate::config();
+
+		// Apply UI zoom (in addition to OS DPI scaling).
+		cc.egui_ctx.set_zoom_factor(config.ui_zoom_factor);
+
+		// Initialize overlay controller if requested.
+		let overlay = matches!(config.ui_mode, crate::config::UiMode::Overlay)
+			.then(|| OverlayController::new(config.overlay_click_through));
+
+		let data = data::Data::load(config.client_language);
+
+		let uniform = Arc::new(crate::UniformData {
+			iepol: crate::iepol::IePol::new(cc.egui_ctx.clone()),
+			data,
+			ie: Arc::new(ie::Ie::new(config.theme, config.client_language)),
 		});
-		
-		Ok(Self {
-			modules: vec![
-				Box::new(module::RelicReward::new(uniform.clone())),
-				Box::new(module::Debug::new(uniform.clone())),
-			],
+
+		let modules: Vec<Box<dyn crate::module::Module>> = vec![
+			Box::new(crate::module::RelicReward::new(uniform.clone())),
+			Box::new(crate::module::Debug::new(uniform.clone())),
+		];
+
+		drop(config);
+
+		Self {
 			uniform,
+			modules,
 			tab: Tab::Home,
-		})
-	}
-	
-	fn ui(&mut self, ui: &mut egui::Ui) {
-		ui.label(format!("Seconds till next poll: {}", self.uniform.iepol.secs_till_next_poll()));
-		
-		ui.horizontal(|ui| {
-			if ui.selectable_label(self.tab == Tab::Home, "Home").clicked() {
-				self.tab = Tab::Home;
-			}
-			if ui.selectable_label(self.tab == Tab::Settings, "Settings").clicked() {
-				self.tab = Tab::Settings;
-			}
-			for (i, module) in self.modules.iter_mut().enumerate() {
-				if ui.selectable_label(self.tab == Tab::Module(i), module.name()).clicked() {
-					self.tab = Tab::Module(i);
-				}
-			}
-		});
-		
-		ui.separator();
-		
-		match self.tab {
-			Tab::Home => {
-				for module in &mut self.modules {
-					if module.ui_important(ui) {
-						ui.separator();
-					}
-				}
-			}
-			Tab::Settings => settings::ui(ui, &mut self.modules),
-			Tab::Module(i) => {
-				if let Some(module) = self.modules.get_mut(i) {
-					module.ui(ui);
-				}
-			}
+			overlay,
+			overlay_show_settings: false,
 		}
+	}
+
+	fn ui_home(&mut self, ui: &mut egui::Ui) {
+		for module in &mut self.modules {
+			module.ui_important(ui);
+		}
+	}
+
+	fn ui_settings(&mut self, ui: &mut egui::Ui) {
+		settings::ui(ui, &mut self.modules);
+	}
+
+	fn is_overlay(&self) -> bool {
+		self.overlay.is_some()
 	}
 }
 
 impl eframe::App for WFBuddy {
-	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-		// Drive background processing.
+	fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+		// Apply overlay behavior (follow + click-through toggle).
+		if let Some(overlay) = &mut self.overlay {
+				// Runtime toggle: make overlay interactable / click-through.
+				if ctx.input(|i| i.key_pressed(egui::Key::F8)) {
+					let mut config = crate::config();
+					config.overlay_click_through = !config.overlay_click_through;
+					config.save();
+				}
+
+			let config = crate::config();
+			overlay.set_click_through(config.overlay_click_through);
+			let app_id = config.app_id.clone();
+			drop(config);
+
+			overlay.update(ctx, frame, &app_id);
+		}
+
+		// Apply zoom changes if user updated config while running.
+		let zoom = crate::config().ui_zoom_factor;
+		if (ctx.zoom_factor() - zoom).abs() > f32::EPSILON {
+			ctx.set_zoom_factor(zoom);
+		}
+
+		if self.is_overlay() {
+			egui::Area::new("overlay_root")
+				.fixed_pos(egui::pos2(12.0, 12.0))
+				.show(ctx, |ui| {
+					egui::Frame::default()
+						.fill(egui::Color32::from_black_alpha(128))
+						.rounding(6.0)
+						.inner_margin(egui::Margin::same(8.0))
+						.show(ui, |ui| {
+							ui.horizontal(|ui| {
+								ui.label(crate::tr!("app-title"));
+								ui.add_space(6.0);
+
+								if ui.small_button("⚙").clicked() {
+									self.overlay_show_settings = !self.overlay_show_settings;
+								}
+
+								let click_through = crate::config().overlay_click_through;
+								ui.add_space(6.0);
+								ui.label(if click_through {
+									crate::tr!("label-overlay-clickthrough")
+								} else {
+									crate::tr!("hint-overlay-hotkey")
+								});
+							});
+
+							ui.separator();
+							self.ui_home(ui);
+						});
+				});
+
+			if self.overlay_show_settings {
+				egui::Window::new(crate::tr!("tab-settings"))
+					.default_size([420.0, 520.0])
+					.show(ctx, |ui| self.ui_settings(ui));
+			}
+		} else {
+			egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
+				ui.horizontal(|ui| {
+					ui.selectable_value(&mut self.tab, Tab::Home, crate::tr!("tab-home"));
+					ui.selectable_value(&mut self.tab, Tab::Settings, crate::tr!("tab-settings"));
+				});
+			});
+
+			egui::CentralPanel::default().show(ctx, |ui| match self.tab {
+				Tab::Home => self.ui_home(ui),
+				Tab::Settings => self.ui_settings(ui),
+			});
+		}
+
 		for module in &mut self.modules {
 			module.tick();
 		}
-		
-		egui::CentralPanel::default().show(ctx, |ui| self.ui(ui));
-		
-		// Avoid pegging a CPU core by repainting every frame.
-		// We repaint often enough to keep timers (poll countdown) responsive.
-		let secs = self.uniform.iepol.secs_till_next_poll();
-		let after = Duration::from_secs_f32(secs.clamp(0.05, 0.5));
-		ctx.request_repaint_after(after);
 	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Tab {
+	Home,
+	Settings,
 }

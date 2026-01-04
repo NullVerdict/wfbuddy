@@ -13,24 +13,11 @@ pub struct Ie {
 }
 
 impl Ie {
-	pub fn try_new(
-		theme: Theme,
-		ocr_detection: impl AsRef<std::path::Path>,
-		ocr_recognition: impl AsRef<std::path::Path>,
-		ocr_charsset: impl AsRef<std::path::Path>,
-	) -> anyhow::Result<Self> {
-		Ok(Self {
-			theme,
-			ocr: ocr::Ocr::try_new(ocr_detection, ocr_recognition, ocr_charsset)?,
-		})
-	}
-
-	/// Backwards-compatible constructor.
-	///
-	/// Prefer [`Ie::try_new`] so the caller can handle missing model files gracefully.
 	pub fn new(theme: Theme, ocr_detection: impl AsRef<std::path::Path>, ocr_recognition: impl AsRef<std::path::Path>, ocr_charsset: impl AsRef<std::path::Path>) -> Self {
-		Self::try_new(theme, ocr_detection, ocr_recognition, ocr_charsset)
-			.expect("IE initialization failed (OCR models missing?)")
+		Self {
+			theme,
+			ocr: ocr::Ocr::new(ocr_detection, ocr_recognition, ocr_charsset),
+		}
 	}
 	
 	pub fn util_party_header_text(&self, image: Image) -> String {
