@@ -48,19 +48,14 @@ impl RelicReward {
 	fn check_selected(&mut self, image: std::sync::Arc<ie::OwnedImage>) {
 		let selected = self.uniform.ie.relicreward_get_selected(image.as_image());
 		if let Some(reward) = self.current_rewards.get(selected as usize) {
-			// The fissure screen can show rewards like "2 X Forma Blueprint".
-			// Count that as 2 items, not 1 selection.
-			let mut amount = 1u32;
-			if let Some((count, _rest)) = reward.name.split_once(" X ") {
-				if let Ok(c) = count.trim().parse::<u32>() {
-					amount = c.max(1);
-				}
-			}
-			log::debug!(
-				"incrementing {} by {amount} as the picked index was {selected}",
-				reward.name
-			);
-			*self.selected_rewards.entry(reward.name.clone()).or_insert(0) += amount;
+			log::debug!("incrementing {} as the picked index was {selected}", reward.name);
+			// Some rewards are shown as "2 X Forma Blueprint" etc.
+			let inc = reward
+				.name
+				.split_once(" X ")
+				.and_then(|(n, _)| n.trim().parse::<u32>().ok())
+				.unwrap_or(1);
+			*self.selected_rewards.entry(reward.name.clone()).or_insert(0) += inc;
 		}
 		
 		self.current_rewards.clear();

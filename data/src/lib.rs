@@ -9,67 +9,6 @@ use anyhow::{Context, Result};
 
 mod schema;
 
-#[derive(Default)]
-struct EnrichedData {
-	relic_items: HashSet<String>,
-	vaulted_items: HashSet<String>,
-}
-
-fn enrich_with_public_export(game_ref_map: &HashMap<String, String>) -> Result<EnrichedData> {
-	let export = schema::publicexport::PublicExport::new_english()
-		.context("Load Warframe PublicExport manifest")?;
-
-	let mut res = ureq::get(&export.relic_arcane_url)
-		.call()
-		.with_context(|| format!("GET PublicExport RelicArcane {}", export.relic_arcane_url))?;
-	let relic_arcane = res
-		.body_mut()
-		.read_json::<schema::publicexport::relicarcane::RelicArcane>()
-		.context("Decode PublicExport RelicArcane JSON")?;
-
-	let droppable_relics = schema::droptable::fetch_relic_names().ok();
-	if droppable_relics.is_none() {
-		log::warn!("Could not fetch droptables; vaulted detection disabled");
-	}
-
-	let mut all_relic_names: HashSet<String> = HashSet::new();
-	let mut item_relics: HashMap<String, HashSet<String>> = HashMap::new();
-	let mut out = EnrichedData::default();
-
-	for v in relic_arcane.items {
-		let schema::publicexport::relicarcane::Item::Relic(relic) = v else {continue};
-		all_relic_names.insert(relic.name.clone());
-
-		for reward in relic.relic_rewards {
-			let Some(base_name) = game_ref_map.get(&reward.reward_name) else {continue};
-			out.relic_items.insert(base_name.clone());
-			item_relics.entry(base_name.clone()).or_default().insert(relic.name.clone());
-
-			// Some rewards are shown as "2 X ..." in the UI.
-			if reward.item_count > 1 {
-				let counted = format!("{} X {}", reward.item_count, base_name);
-				out.relic_items.insert(counted.clone());
-				item_relics.entry(counted).or_default().insert(relic.name.clone());
-			}
-		}
-	}
-
-	if let Some(droppable) = droppable_relics {
-		let vaulted_relics = all_relic_names
-			.into_iter()
-			.filter(|name| !droppable.contains(name))
-			.collect::<HashSet<_>>();
-
-		for (item_name, relics) in item_relics {
-			if relics.iter().all(|r| vaulted_relics.contains(r)) {
-				out.vaulted_items.insert(item_name);
-			}
-		}
-	}
-
-	Ok(out)
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Data {
 	pub platinum_values: HashMap<String, f32>,
@@ -150,14 +89,15 @@ impl Data {
 			.read_json::<schema::ducats::Ducats>()
 			.context("Decode ducats JSON")?;
 
-		// Market item id -> English name
 		let name_map = items
 			.data
 			.iter()
 			.map(|v| (v.id.clone(), v.i18n.en.name.clone()))
 			.collect::<HashMap<_, _>>();
-		// In-game uniqueName ("gameRef") -> English name
-		let game_ref_map = items
+
+		// Map Warframe "uniqueName" (gameRef) -> English display name.
+		// This lets us bridge PublicExport rewards (uniqueName paths) to market item names.
+		let game_ref_to_name = items
 			.data
 			.iter()
 			.filter_map(|v| v.game_ref.as_ref().map(|gr| (gr.clone(), v.i18n.en.name.clone())))
@@ -180,18 +120,88 @@ impl Data {
 			s.relic_items.insert(name);
 		}
 
-		// Best-effort: enrich the dataset with relic reward names (not only the ducat feed)
-		// and infer which items are vaulted using the official droptables page.
-		//
-		// If any of these calls fail, we still return the market data above.
-		match enrich_with_public_export(&game_ref_map) {
-			Ok(enriched) => {
-				s.relic_items.extend(enriched.relic_items);
-				s.vaulted_items.extend(enriched.vaulted_items);
+		// Best-effort: augment with PublicExport relic rewards and compute vaulted items.
+		// If any of this fails (network, parsing, format changes), we keep market prices working.
+		if let Ok(publicexport) = schema::publicexport::PublicExport::new() {
+			let relicarcane_res = (|| -> Result<schema::publicexport::relicarcane::RelicArcane> {
+				let mut res = ureq::get(&publicexport.relic_arcane_url)
+					.call()
+					.context("GET PublicExport ExportRelicArcane")?;
+				Ok(res
+					.body_mut()
+					.read_json::<schema::publicexport::relicarcane::RelicArcane>()
+					.context("Decode PublicExport ExportRelicArcane JSON")?)
+			})();
+
+			match relicarcane_res {
+				Ok(relicarcane) => {
+					let droptable = match schema::droptable::downloaded_relic_names() {
+						Ok(set) if !set.is_empty() => Some(set),
+						Ok(_) => {
+							log::warn!("Droptables returned no relics; skipping vaulted detection");
+							None
+						}
+						Err(err) => {
+							log::warn!("Failed to download/parse droptables; skipping vaulted detection: {err:#}");
+							None
+						}
+					};
+
+					let mut vaulted_relics: HashSet<String> = HashSet::new();
+					let mut item_relics: HashMap<String, Vec<String>> = HashMap::new();
+
+					for entry in relicarcane.items {
+						let schema::publicexport::relicarcane::Item::Relic(relic) = entry else { continue };
+						let relic_name = relic.name;
+
+						if let Some(active) = droptable.as_ref() {
+							if !active.contains(&relic_name) {
+								vaulted_relics.insert(relic_name.clone());
+							}
+						}
+
+						for reward in relic.relic_rewards {
+							let Some(base) = game_ref_to_name.get(&reward.reward_name) else {
+								log::debug!("No warframe.market mapping for gameRef {}", reward.reward_name);
+								continue;
+							};
+
+							let count = reward.item_count.max(1) as u32;
+							let base_name = base.clone();
+							s.relic_items.insert(base_name.clone());
+							item_relics.entry(base_name.clone()).or_default().push(relic_name.clone());
+
+							if count > 1 {
+								let multi_name = format!("{count} X {base_name}");
+								s.relic_items.insert(multi_name.clone());
+								item_relics.entry(multi_name.clone()).or_default().push(relic_name.clone());
+
+								// If we have single-item values, derive multi values.
+								if let Some(p) = s.platinum_values.get(&base_name).copied() {
+									s.platinum_values.insert(multi_name.clone(), p * count as f32);
+								}
+								if let Some(d) = s.ducat_values.get(&base_name).copied() {
+									s.ducat_values.insert(multi_name, d * count);
+								}
+							}
+						}
+					}
+
+					// Only compute vaulted items if we successfully loaded droptables.
+					if droptable.is_some() {
+						for (item, relics) in item_relics {
+							if relics.iter().all(|r| vaulted_relics.contains(r)) {
+								s.vaulted_items.insert(item);
+							}
+						}
+					}
+				}
+				Err(err) => {
+					log::warn!("Failed to load PublicExport relic data; skipping vaulted detection: {err:#}");
+				}
 			}
-			Err(err) => {
-				log::warn!("Failed to enrich dataset with PublicExport/droptables: {err:#}");
-			}
+		} else {
+			log::warn!("Failed to initialize PublicExport; skipping vaulted detection");
 		}
 
 		// Ensure Forma entries exist even if the remote feed changes.

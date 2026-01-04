@@ -4,27 +4,27 @@ use anyhow::{Context, Result};
 
 const URL: &str = "https://warframe.com/droptables";
 
-/// Scrape the official droptables page to get the list of relics that are currently available
-/// as drops.
+/// Downloads the official drop tables page and extracts the names of currently-dropping relics.
 ///
-/// The page is HTML, so we use a lightweight regex (same general approach as the original
-/// WFBuddy codebase).
-pub fn fetch_relic_names() -> Result<HashSet<String>> {
-	let html = ureq::get(URL)
-		.call()
-		.context("GET droptables")?
-		.body_mut()
-		.read_to_string()
-		.context("Read droptables HTML")?;
+/// We keep this intentionally simple (best-effort): if the page layout changes, we just won't
+/// populate vaulted detection, but the rest of the app still works.
+pub fn downloaded_relic_names() -> Result<HashSet<String>> {
+	let resp = ureq::get(URL).call().context("GET droptables")?;
+	let html = resp.into_string().context("Read droptables HTML")?;
 
+	// This is the same basic approach as the original project: match the first <td> in a row.
+	// Example match: <tr><td>Lith A1 Relic</td>
 	let regex = regex::Regex::new(r"<tr><td>(?:</td><td>)?(?<name>[^<]+)</td>")
 		.context("Compile droptables regex")?;
-	let items = regex
-		.captures_iter(&html)
-		.filter_map(|cap| cap.name("name"))
-		.map(|m| m.as_str().trim().to_string())
-		.filter(|name| name.ends_with("Relic"))
-		.collect::<HashSet<_>>();
+
+	let mut items = HashSet::new();
+	for cap in regex.captures_iter(&html) {
+		let Some(name) = cap.name("name") else { continue };
+		let name = name.as_str().trim();
+		if name.ends_with("Relic") {
+			items.insert(name.to_string());
+		}
+	}
 
 	Ok(items)
 }
