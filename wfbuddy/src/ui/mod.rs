@@ -142,10 +142,23 @@ impl WFBuddy {
 
 		let placement = if attach_to_game { self.first_overlay_placement() } else { None };
 
+		// Create the viewport for the overlay. We use a dedicated viewport so it can sit on top of the game
+		// without requiring a separate "view mode" window.
+		let mut builder = egui::ViewportBuilder::default()
+			.with_title("WFBuddy Overlay")
+			.with_decorations(false)
+			.with_always_on_top()
+			.with_transparent(true)
+			.with_resizable(false)
+			.with_taskbar(false)
+			.with_active(false)
+			.with_mouse_passthrough(passthrough);
+
 		// Default size/position: small panel near the game window corner.
 		let default_size = egui::vec2(480.0, 280.0);
 		let default_pos = if let Some(b) = bounds {
-			egui::pos2(b.x + margin, b.y + margin)
+			// `window_bounds` coordinates are typically in physical pixels. Egui expects logical points.
+			egui::pos2(b.x / b.scale_factor + margin, b.y / b.scale_factor + margin)
 		} else {
 			egui::pos2(margin, margin)
 		};
