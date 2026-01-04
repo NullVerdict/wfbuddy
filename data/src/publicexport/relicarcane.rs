@@ -1,7 +1,3 @@
-// These types are primarily used for serde deserialization of Warframe's PublicExport data.
-// Some fields are not accessed directly in this crate, but they must exist to parse the JSON.
-#![allow(dead_code)]
-
 #[derive(serde::Deserialize)]
 pub struct RelicArcane {
 	#[serde(rename = "ExportRelicArcane")]

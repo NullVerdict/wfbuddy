@@ -1,274 +1,293 @@
 use std::sync::LazyLock;
 
-use crate::{Image, Mask, OwnedImage, OwnedMask, Theme};
+use regex::Regex;
+
+use crate::{
+	image::{Image, Mask, OwnedImage, OwnedMask},
+	ocr::Ocr,
+	theme::Theme,
+	util::DIGIT_REGEX,
+};
+
+/// Rarity tiers in the relic reward screen.
+/// Warframe commonly refers to these visually as Bronze (Common), Silver (Uncommon), Gold (Rare).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rarity {
+	Common,
+	Uncommon,
+	Rare,
+}
+
+impl Rarity {
+	#[must_use]
+	pub const fn label(self) -> &'static str {
+		match self {
+			Self::Common => "Bronze",
+			Self::Uncommon => "Silver",
+			Self::Rare => "Gold",
+		}
+	}
+}
+
+pub struct Reward {
+	pub name: String,
+	pub owned: u32,
+	pub rarity: Rarity,
+}
 
 pub struct Rewards {
 	pub timer: u32,
 	pub rewards: Vec<Reward>,
 }
 
-pub struct Reward {
-	pub name: String,
-	pub owned: u32,
+static OWNED_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Owned:\s*([0-9]+)").unwrap());
+
+static ICON_COMMON: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {
+	OwnedImage::from_png_mask(include_bytes!("../../assets/common.png"), 220).unwrap()
+});
+static ICON_UNCOMMON: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {
+	OwnedImage::from_png_mask(include_bytes!("../../assets/uncommon.png"), 220).unwrap()
+});
+static ICON_RARE: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {
+	OwnedImage::from_png_mask(include_bytes!("../../assets/rare.png"), 220).unwrap()
+});
+
+const REFERENCE_HEIGHT: f32 = 1080.0;
+const ICON_BASE_SIZE: u32 = 40;
+
+/// Scale a reference-space pixel measurement into the current image space.
+#[inline]
+fn px(reference_px: u32, image: Image, ui_scale: f32) -> u32 {
+	let scale = (image.height() as f32 / REFERENCE_HEIGHT) * ui_scale;
+	let v = (reference_px as f32 * scale).round();
+	// Avoid zero-sized sub-images.
+	v.max(1.0) as u32
 }
 
-/// Expects an image with a height of 1080
-pub(crate) fn get_rewards(image: Image, theme: Theme, ocr: &crate::ocr::Ocr) -> Rewards {
-	const CRAFTED_AREA_SIZE: u32 = 32;
-	const NAME_AREA_SIZE: u32 = 70;
-	const TIMER_Y: u32 = 135;
-	const TIMER_W: u32 = 64;
-	const TIMER_H: u32 = 64;
-
-	static OWNED_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
-		regex::Regex::new(r"(?<amount>\d+)?\s*(?:Owned|Crafted)").unwrap()
-	});
-
-	let rewards = get_reward_subimages(image)
-		.into_iter()
-		.map(|image| {
-			let name = image.trimmed_bottom(NAME_AREA_SIZE).get_text(theme, ocr);
-
-			let owned_text = image.trimmed_top(CRAFTED_AREA_SIZE).get_text(theme, ocr);
-			let owned = OWNED_REGEX
-				.captures(&owned_text)
-				.map(|cap| {
-					cap.name("amount")
-						.and_then(|m| m.as_str().parse::<u32>().ok())
-						.unwrap_or(1)
-				})
-				.unwrap_or(0);
-
-			Reward { name, owned }
-		})
-		.collect();
-
-	let timer_text = image
-		.trimmed_centerh(TIMER_W)
-		.sub_image(0, TIMER_Y, TIMER_W, TIMER_H)
-		.get_text(Theme::WHITE, ocr);
-
-	let timer = crate::util::DIGIT_REGEX
-		.captures(&timer_text)
-		.and_then(|cap| cap.name("digits"))
-		.and_then(|m| m.as_str().parse::<u32>().ok())
-		.unwrap_or(10);
-
-	Rewards { timer, rewards }
+#[inline]
+fn clamp_sub_image(image: Image, x: i32, y: i32, w: u32, h: u32) -> Image {
+	let max_x = image.width().saturating_sub(w) as i32;
+	let max_y = image.height().saturating_sub(h) as i32;
+	let x = x.clamp(0, max_x) as u32;
+	let y = y.clamp(0, max_y) as u32;
+	image.sub_image(x, y, w, h)
 }
 
-/// Expects an image with a height of 1080
-pub(crate) fn get_selected(image: Image, theme: Theme) -> u32 {
-	let rewards = get_reward_subimages(image);
+#[derive(Debug, Clone)]
+struct RewardLayout {
+	count: u32,
+	rarities: Vec<Rarity>,
+}
 
-	let mut picked = 0;
-	let mut best_dev = f32::INFINITY;
+/// Find the best rarity icon match at `(x, y)` in `area`.
+///
+/// Returns `(rarity, deviation)` where lower deviation is better.
+fn best_icon_match(area: Image, x: u32, y: u32, icon_size: u32) -> (Rarity, f32) {
+	let icons: [(Rarity, &LazyLock<(OwnedImage, OwnedMask)>); 3] = [
+		(Rarity::Common, &ICON_COMMON),
+		(Rarity::Uncommon, &ICON_UNCOMMON),
+		(Rarity::Rare, &ICON_RARE),
+	];
 
-	for (i, image) in rewards.iter().enumerate() {
-		let dev = image
-			.sub_image(image.width() - 12, 0, 12, 12)
-			.average_color()
-			.deviation(theme.secondary);
+	let mut best = (Rarity::Common, f32::INFINITY);
 
-		if dev < best_dev {
-			picked = i as u32;
-			best_dev = dev;
+	// Small jitter helps with off-by-one rounding in scaling and capture.
+	for jitter_y in -1..=1 {
+		for jitter_x in -1..=1 {
+			let sub = clamp_sub_image(area, x as i32 + jitter_x, y as i32 + jitter_y, icon_size, icon_size);
+
+			for (rarity, icon) in icons {
+				let icon_img = icon.0.as_image();
+				let icon_mask = Mask(&icon.1 .0);
+
+				// Normalize scale: resize the sampled icon region to the base template size.
+				let sample = if icon_size == ICON_BASE_SIZE {
+					sub.to_owned_image()
+				} else {
+					sub.to_owned_image().resized_exact(ICON_BASE_SIZE, ICON_BASE_SIZE)
+				};
+
+				let deviation = sample.as_image().average_deviation_masked(icon_img, icon_mask);
+				if deviation < best.1 {
+					best = (rarity, deviation);
+				}
+			}
 		}
 	}
 
-	picked
+	best
 }
 
-fn get_reward_subimages<'a>(image: Image<'a>) -> Vec<Image<'a>> {
+fn icon_positions_for_count(count: u32, center_x: i32, offset: i32) -> Vec<i32> {
+	match count {
+		1 => vec![center_x],
+		2 => vec![center_x - offset / 2, center_x + offset / 2],
+		3 => vec![center_x - offset, center_x, center_x + offset],
+		4 => vec![
+			center_x - (3 * offset) / 2,
+			center_x - offset / 2,
+			center_x + offset / 2,
+			center_x + (3 * offset) / 2,
+		],
+		_ => vec![center_x],
+	}
+}
+
+/// Detect how many reward cards are present, and the rarity tier for each.
+///
+/// Critical bug fix: the old logic could miss a reward when mixed rarity icons were present
+/// (e.g., 3 Bronze + 1 Gold) because it only probed a couple of icon slots and assumed
+/// perfect matching. We now evaluate *all* expected icon positions for counts 1..=4 and
+/// pick the best match, ensuring all tiers are detected and counted.
+fn reward_layout(image: Image, ui_scale: f32) -> RewardLayout {
+	const REWARDS_AREA_WIDTH: u32 = 962;
+	const RARITY_ICON_OFFSET: u32 = 242;
+	const RARITY_ICON_Y: u32 = 459;
+
+	let area_width = px(REWARDS_AREA_WIDTH, image, ui_scale);
+	let icon_offset = px(RARITY_ICON_OFFSET, image, ui_scale) as i32;
+	let icon_y = px(RARITY_ICON_Y, image, ui_scale);
+	let icon_size = px(ICON_BASE_SIZE, image, ui_scale);
+
+	let area = image.trimmed_centerh(area_width);
+	let center_x = (area_width as i32 / 2) - (icon_size as i32 / 2);
+
+	// Threshold carried over from the previous implementation.
+	const HIT_THRESHOLD: f32 = 25.0;
+
+	let mut best_count = 1;
+	let mut best_hits: i32 = -1;
+	let mut best_avg_dev: f32 = f32::INFINITY;
+	let mut best_rarities: Vec<Rarity> = vec![Rarity::Common];
+
+	for candidate in 1..=4 {
+		let mut hits = 0;
+		let mut dev_sum = 0.0;
+		let mut rarities = Vec::with_capacity(candidate as usize);
+
+		for x in icon_positions_for_count(candidate, center_x, icon_offset) {
+			let (rarity, dev) = best_icon_match(area, x as u32, icon_y, icon_size);
+			rarities.push(rarity);
+
+			if dev <= HIT_THRESHOLD {
+				hits += 1;
+				dev_sum += dev;
+			}
+		}
+
+		let avg_dev = if hits > 0 { dev_sum / hits as f32 } else { f32::INFINITY };
+
+		// Prefer: more hits, then larger candidate (avoid "dropping" a slot), then lower deviation.
+		let better = (hits as i32 > best_hits)
+			|| (hits as i32 == best_hits && candidate > best_count)
+			|| (hits as i32 == best_hits && candidate == best_count && avg_dev < best_avg_dev);
+
+		if better {
+			best_count = candidate;
+			best_hits = hits as i32;
+			best_avg_dev = avg_dev;
+			best_rarities = rarities;
+		}
+	}
+
+	RewardLayout {
+		count: best_count,
+		rarities: best_rarities,
+	}
+}
+
+fn get_reward_subimages(image: Image, ui_scale: f32, count: u32) -> Vec<Image> {
 	const REWARD_SIZE: u32 = 235;
 	const REWARD_SPACING: u32 = 8;
 	const REWARD_Y: u32 = 225;
 
-	let count = reward_count(image).max(1);
+	let reward_size = px(REWARD_SIZE, image, ui_scale);
+	let spacing = px(REWARD_SPACING, image, ui_scale);
+	let reward_y = px(REWARD_Y, image, ui_scale);
 
-	let area_width = count * REWARD_SIZE + (count - 1) * REWARD_SPACING;
+	let area_width = count * reward_size + count.saturating_sub(1) * spacing;
 	let image = image.trimmed_centerh(area_width);
 
-	let mut images = Vec::with_capacity(count as usize);
-	for i in 0..count {
-		let offset = (REWARD_SIZE + REWARD_SPACING) * i;
-		images.push(image.sub_image(offset, REWARD_Y, REWARD_SIZE, REWARD_SIZE));
-	}
-
-	images
+	(0..count)
+		.map(|i| {
+			let x = (reward_size + spacing) * i;
+			image.sub_image(x, reward_y, reward_size, reward_size)
+		})
+		.collect()
 }
 
-static ICON_COMMON: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {
-	crate::OwnedImage::from_png_mask(include_bytes!("../asset/icon_common.png"), 250).unwrap()
-});
-static ICON_UNCOMMON: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {
-	crate::OwnedImage::from_png_mask(include_bytes!("../asset/icon_uncommon.png"), 250).unwrap()
-});
-static ICON_RARE: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {
-	crate::OwnedImage::from_png_mask(include_bytes!("../asset/icon_rare.png"), 250).unwrap()
-});
+pub(crate) fn get_rewards(image: Image, theme: Theme, ocr: &Ocr, ui_scale: f32) -> Rewards {
+	const TIMER_W: u32 = 80;
+	const TIMER_H: u32 = 45;
+	const TIMER_Y: u32 = 150;
 
-/// Gets the amount of reward cards shown.
-///
-/// This is **not always equal** to the party size if someone forgot to select a relic.
-///
-/// Bugfix note:
-/// The previous implementation only probed one or two icon positions and could miss the
-/// last card when rarities were mixed (e.g. 3 common + 1 rare). We now evaluate all
-/// expected slots for 1–4 cards and pick the layout with the best match coverage.
-fn reward_count(image: Image) -> u32 {
-	// The full reward strip when 4 cards are shown is ~964 px wide at 1080p.
-	// The capture is trimmed to a slightly smaller, stable width.
-	const REWARDS_AREA_WIDTH: u32 = 962;
+	const CRAFTED_AREA_SIZE: u32 = 35;
+	const NAME_AREA_SIZE: u32 = 80;
 
-	// Card geometry (must match `get_reward_subimages`).
-	const REWARD_SIZE: u32 = 235;
-	const REWARD_SPACING: u32 = 8;
+	let timer_w = px(TIMER_W, image, ui_scale);
+	let timer_h = px(TIMER_H, image, ui_scale);
+	let timer_y = px(TIMER_Y, image, ui_scale);
 
-	// Rarity icon geometry inside the reward strip.
-	const RARITY_ICON_Y: u32 = 459;
-	const RARITY_ICON_SIZE: u32 = 40;
+	let crafted_area = px(CRAFTED_AREA_SIZE, image, ui_scale);
+	let name_area = px(NAME_AREA_SIZE, image, ui_scale);
 
-	// Template-matching settings.
-	const JITTER: i32 = 1;
-	// Luma-only deviation makes this far less sensitive to UI theme tinting.
-	const LUMA_DEVIATION_THRESHOLD: f32 = 0.10;
+	let timer_text = image
+		.trimmed_centerh(timer_w)
+		.sub_image(0, timer_y, timer_w, timer_h)
+		.get_text(theme, ocr);
 
-	let image = image.trimmed_centerh(REWARDS_AREA_WIDTH);
+	let timer = DIGIT_REGEX
+		.find(&timer_text)
+		.and_then(|m| m.as_str().parse().ok())
+		.unwrap_or(0);
 
-	#[inline]
-	fn luma(c: crate::Color) -> f32 {
-		// Rec. 709 luma in 0..1
-		(0.2126 * c.r as f32 + 0.7152 * c.g as f32 + 0.0722 * c.b as f32) / 255.0
-	}
+	let layout = reward_layout(image, ui_scale);
+	let reward_images = get_reward_subimages(image, ui_scale, layout.count);
 
-	fn best_luma_deviation(sub: Image) -> f32 {
-		let mut best = f32::INFINITY;
-
-		for (icon_img, icon_mask) in [&*ICON_COMMON, &*ICON_UNCOMMON, &*ICON_RARE] {
-			let templ = icon_img.as_image();
-			let mask = Mask(&icon_mask.0);
-
-			let mut sum = 0.0f32;
-			let mut count = 0u32;
-
-			let w = templ.width().min(sub.width());
-			let h = templ.height().min(sub.height());
-			for y in 0..h {
-				for x in 0..w {
-					let i = (x + y * templ.width()) as usize;
-					let yes = ((mask.0[i / 8] >> (i % 8)) & 1) == 1;
-					if !yes {
-						continue;
-					}
-					let a = luma(sub.pixel_rel(x, y));
-					let b = luma(templ.pixel_rel(x, y));
-					sum += (a - b).abs();
-					count += 1;
-				}
+	let rewards = reward_images
+		.into_iter()
+		.zip(layout.rarities.into_iter())
+		.filter_map(|(reward_image, rarity)| {
+			let name = reward_image.trimmed_bottom(name_area).get_text(theme, ocr).trim().to_owned();
+			if name.is_empty() {
+				return None;
 			}
 
-			if count > 0 {
-				best = best.min(sum / count as f32);
-			}
-		}
+			let owned_text = reward_image.trimmed_top(crafted_area).get_text(theme, ocr);
+			let owned = OWNED_REGEX
+				.captures(&owned_text)
+				.and_then(|cap| cap.get(1))
+				.and_then(|m| m.as_str().parse().ok())
+				.unwrap_or(0);
 
-		best
-	}
+			Some(Reward { name, owned, rarity })
+		})
+		.collect();
 
-	fn icon_present_at(image: Image, x_left: i32) -> bool {
-		let x_left = x_left.max(0) as u32;
+	Rewards { timer, rewards }
+}
 
-		if x_left + RARITY_ICON_SIZE > image.width() {
-			return false;
-		}
-		if RARITY_ICON_Y + RARITY_ICON_SIZE > image.height() {
-			return false;
-		}
+pub(crate) fn get_selected(image: Image, theme: Theme, ui_scale: f32) -> u32 {
+	// Size of the highlight patch in the top-right of the selected card.
+	const SELECTED_SIZE: u32 = 12;
 
-		for dy in -JITTER..=JITTER {
-			for dx in -JITTER..=JITTER {
-				let x = (x_left as i32 + dx).clamp(0, (image.width() - RARITY_ICON_SIZE) as i32) as u32;
-				let y = (RARITY_ICON_Y as i32 + dy).clamp(0, (image.height() - RARITY_ICON_SIZE) as i32) as u32;
+	let layout = reward_layout(image, ui_scale);
+	let reward_images = get_reward_subimages(image, ui_scale, layout.count);
 
-				let sub = image.sub_image(x, y, RARITY_ICON_SIZE, RARITY_ICON_SIZE);
-				if best_luma_deviation(sub) <= LUMA_DEVIATION_THRESHOLD {
-					return true;
-				}
-			}
-		}
+	let size = px(SELECTED_SIZE, image, ui_scale);
 
-		false
-	}
+	let mut best_idx = 0;
+	let mut best_dev = f32::INFINITY;
 
-	#[derive(Clone, Copy)]
-	struct Candidate {
-		count: u32,
-		matches: u32,
-		avg_dev: f32,
-	}
-
-	fn evaluate(image: Image, count: u32) -> Candidate {
-		let total_width = count * REWARD_SIZE + count.saturating_sub(1) * REWARD_SPACING;
-		let margin = (REWARDS_AREA_WIDTH as i32 - total_width as i32) / 2;
-
-		let mut matches = 0u32;
-		let mut dev_sum = 0.0f32;
-
-		for i in 0..count {
-			let reward_left = margin + (i * (REWARD_SIZE + REWARD_SPACING)) as i32;
-			let icon_center = reward_left + (REWARD_SIZE as i32 / 2);
-			let x_left = icon_center - (RARITY_ICON_SIZE as i32 / 2);
-
-			// Track deviation for tie-breaking even if not present.
-			let x_left_u = x_left.max(0) as u32;
-			let x_left_u = x_left_u.min(image.width().saturating_sub(RARITY_ICON_SIZE));
-			let sub = image.sub_image(x_left_u, RARITY_ICON_Y, RARITY_ICON_SIZE, RARITY_ICON_SIZE);
-			let dev = best_luma_deviation(sub);
-			dev_sum += dev;
-
-			if icon_present_at(image, x_left) {
-				matches += 1;
-			}
-		}
-
-		Candidate {
-			count,
-			matches,
-			avg_dev: dev_sum / count.max(1) as f32,
+	for (idx, reward_image) in reward_images.into_iter().enumerate() {
+		let x = reward_image.width().saturating_sub(size);
+		let patch = reward_image.sub_image(x, 0, size, size);
+		let dev = patch.average_deviation(theme.secondary);
+		if dev < best_dev {
+			best_dev = dev;
+			best_idx = idx as u32;
 		}
 	}
 
-	let mut best = Candidate {
-		count: 1,
-		matches: 0,
-		avg_dev: f32::INFINITY,
-	};
-
-	for count in 1..=4 {
-		let c = evaluate(image, count);
-
-		let best_is_perfect = best.matches == best.count;
-		let c_is_perfect = c.matches == c.count;
-
-		best = match (best_is_perfect, c_is_perfect) {
-			(false, true) => c,
-			(true, false) => best,
-			_ => {
-				// Both perfect OR both imperfect: choose higher match coverage, then lower deviation.
-				if (c.matches, -c.avg_dev) > (best.matches, -best.avg_dev) {
-					c
-				} else {
-					best
-				}
-			}
-		};
-	}
-
-	// If the best candidate isn't perfect, fall back to "how many icons we actually saw".
-	if best.matches < best.count {
-		best.matches.max(1)
-	} else {
-		best.count
-	}
+	best_idx
 }

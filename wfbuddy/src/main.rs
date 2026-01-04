@@ -6,8 +6,6 @@ pub mod capture;
 mod iepol;
 mod module;
 mod ui;
-mod i18n;
-mod overlay;
 pub use ui::UiExt;
 mod config;
 
@@ -24,26 +22,5 @@ pub fn config() -> std::sync::MutexGuard<'static, config::Config> {
 }
 
 fn main() {
-	// Load config early so we can configure localization and window options.
-	let cfg = config().clone();
-	i18n::init(Some(&cfg.ui_locale));
-
-	let title = tr!("app-title").to_string();
-
-	let mut native_options = eframe::NativeOptions::default();
-
-	// Configure overlay window behavior at startup (some options require restart).
-	if matches!(cfg.ui_mode, config::UiMode::Overlay) {
-		native_options.viewport = native_options
-			.viewport
-			.with_decorations(false)
-			.with_transparent(true)
-			.with_always_on_top();
-	}
-
-	let _ = eframe::run_native(
-		&title,
-		native_options,
-		Box::new(|cc| Ok(Box::new(ui::WFBuddy::new(cc)))),
-	);
+	eframe::run_native("WFBuddy", Default::default(), Box::new(|cc| Ok(Box::new(ui::WFBuddy::new(cc))))).unwrap();
 }

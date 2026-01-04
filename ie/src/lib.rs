@@ -20,23 +20,27 @@ impl Ie {
 		}
 	}
 	
+	pub fn util_party_header_text_scaled(&self, image: Image, ui_scale: f32) -> String {
+		util::party_header_text_scaled(image, self.theme, &self.ocr, ui_scale)
+	}
+	
 	pub fn util_party_header_text(&self, image: Image) -> String {
-		util::party_header_text(image, self.theme, &self.ocr)
+		self.util_party_header_text_scaled(image, 1.0)
 	}
 	
-	pub fn relicreward_get_rewards(&self, image: Image) -> screen::relicreward::Rewards {
-		screen::relicreward::get_rewards(image, self.theme, &self.ocr)
+	pub fn relicreward_get_rewards(&self, image: Image, ui_scale: f32) -> screen::relicreward::Rewards {
+		screen::relicreward::get_rewards(image, self.theme, &self.ocr, ui_scale)
+	}
+
+	pub fn relicreward_get_rewards_default(&self, image: Image) -> screen::relicreward::Rewards {
+		self.relicreward_get_rewards(image, 1.0)
 	}
 	
-	pub fn relicreward_get_selected(&self, image: Image) -> u32 {
-		screen::relicreward::get_selected(image, self.theme)
+	pub fn relicreward_get_selected(&self, image: Image, ui_scale: f32) -> u32 {
+		screen::relicreward::get_selected(image, self.theme, ui_scale)
 	}
 
-	pub fn ocr_available(&self) -> bool {
-		self.ocr.is_available()
-	}
-
-	pub fn ocr_init_error(&self) -> Option<&str> {
-		self.ocr.init_error()
+	pub fn relicreward_get_selected_default(&self, image: Image) -> u32 {
+		self.relicreward_get_selected(image, 1.0)
 	}
 }

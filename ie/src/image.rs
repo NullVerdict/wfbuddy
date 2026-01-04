@@ -9,7 +9,7 @@ pub struct OwnedImage {
 
 impl OwnedImage {
 	pub fn from_rgba(width: usize, bytes: &[u8]) -> Self {
-		let height = bytes.len() / width / 4;
+		let height = bytes.len() as usize / width / 4;
 		let data = bytes
 			.chunks_exact(4)
 			.map(|v| Color::new(v[0], v[1], v[2]))
@@ -29,11 +29,10 @@ impl OwnedImage {
 		let mut buf = vec![0u8; reader.output_buffer_size().ok_or("Png too big for this systems memory (how tf)")?];
 		let info = reader.next_frame(&mut buf)?;
 		let bytes = &buf[..info.buffer_size()];
-		let width = info.width as usize;
-		let height = bytes.len() / width / 4;
+		let height = bytes.len() as usize / info.width as usize / 4;
 		
-		let mut data = Vec::with_capacity(width * height);
-		let mut mask = vec![0u8; width * height / 8 + 1];
+		let mut data = Vec::with_capacity(info.width as usize * height);
+		let mut mask = vec![0u8; info.width as usize * height / 8 + 1];
 		
 		for (i, v) in bytes.chunks_exact(4).enumerate() {
 			data.push(Color::new(v[0], v[1], v[2]));
@@ -54,33 +53,19 @@ impl OwnedImage {
 	
 	pub fn resize_h(&mut self, height: u32) {
 		if self.height == height {return}
-		println!("resizing");
 		// cba implementing the trait on this
 		let width = self.width * height / self.height;
-		let img = fast_image_resize::images::ImageRef::from_pixels(
-			self.width,
-			self.height,
-			unsafe {
-				std::slice::from_raw_parts(
-					self.data[..].as_ptr() as *const fast_image_resize::pixels::U8x3,
-					self.data.len(),
-				)
-			},
-		)
-		.unwrap();
+		let img = fast_image_resize::images::ImageRef::from_pixels(self.width, self.height, unsafe{std::slice::from_raw_parts(self.data[..].as_ptr() as *const fast_image_resize::pixels::U8x3, self.data.len())}).unwrap();
 		let mut dst = fast_image_resize::images::Image::new(width, height, fast_image_resize::PixelType::U8x3);
 		
 		let mut resizer = fast_image_resize::Resizer::new();
 		resizer.resize(&img, &mut dst, &Some(fast_image_resize::ResizeOptions::new().resize_alg(fast_image_resize::ResizeAlg::Interpolation(fast_image_resize::FilterType::CatmullRom)))).unwrap();
 		
-		// `fast_image_resize` returns a packed RGB byte buffer for `U8x3`.
-		// Convert it safely into our `Vec<Color>` without `transmute`.
-		let bytes = dst.into_vec();
-		let data = bytes
-			.chunks_exact(3)
-			.map(|v| Color::new(v[0], v[1], v[2]))
-			.collect::<Vec<_>>();
-		*self = Self { width, height, data };
+		*self = Self {
+			width,
+			height,
+			data: unsafe{std::mem::transmute(dst.into_vec())},
+		}
 	}
 	
 	#[inline]
@@ -96,6 +81,54 @@ impl OwnedImage {
 	}
 	
 	// Since we cant deref to a lifetime object
+
+	/// Resize the image in-place to an exact `width` x `height`.
+	///
+	/// This uses a high-quality resampler via `fast_image_resize`.
+	pub fn resize_exact(&mut self, width: u32, height: u32) {
+		if self.width == width && self.height == height {
+			return;
+		}
+
+		let src = fast_image_resize::images::ImageRef::from_pixels(
+			self.width,
+			self.height,
+			// SAFETY: `Color` is `#[repr(C)]` compatible with `U8x3` (r,g,b).
+			unsafe {
+				std::slice::from_raw_parts(
+					self.data.as_ptr() as *const fast_image_resize::pixels::U8x3,
+					self.data.len(),
+				)
+			},
+		)
+		.expect("valid source image");
+
+		let mut dst =
+			fast_image_resize::images::Image::new(width, height, fast_image_resize::PixelType::U8x3);
+
+		let mut resizer = fast_image_resize::Resizer::new(
+			fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Lanczos3),
+		);
+
+		resizer
+			.resize(&src, &mut dst, None)
+			.expect("image resize");
+
+		self.width = width;
+		self.height = height;
+
+		// SAFETY: destination pixel type is U8x3 (r,g,b) with identical layout to `Color`.
+		self.data = unsafe { std::mem::transmute(dst.into_vec()) };
+	}
+
+	/// Return a resized copy of this image at an exact `width` x `height`.
+	#[must_use]
+	pub fn resized_exact(&self, width: u32, height: u32) -> Self {
+		let mut cloned = self.clone();
+		cloned.resize_exact(width, height);
+		cloned
+	}
+
 	pub fn as_image<'a>(&'a self) -> Image<'a> {
 		Image {
 			x1: 0,
@@ -129,15 +162,6 @@ impl<'a> Image<'a> {
 	#[inline(always)]
 	pub fn height(&self) -> u32 {
 		self.y2 - self.y1
-	}
-
-	/// Get a pixel by *relative* coordinates within this view (0..width, 0..height).
-	///
-	/// Many internal routines work with relative coordinates; exposing this helper
-	/// keeps image views encapsulated while allowing fast access when needed.
-	#[inline(always)]
-	pub fn pixel_rel(&self, x: u32, y: u32) -> Color {
-		*self.pixel(self.x1 + x, self.y1 + y)
 	}
 	
 	#[inline(always)]
@@ -308,7 +332,7 @@ impl<'a> Image<'a> {
 			}
 		}
 		
-		let count = self.width() * self.height();
+		let count = (self.width() * self.height()) as u32;
 		Color {
 			r: (r / count) as u8,
 			g: (g / count) as u8,

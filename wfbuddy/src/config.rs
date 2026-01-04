@@ -1,16 +1,6 @@
 use std::{fs::File, io::{BufReader, BufWriter}};
 use serde::{Deserialize, Serialize};
 
-
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum UiMode {
-	#[default]
-	Window,
-	Overlay,
-}
-
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
@@ -22,13 +12,19 @@ pub struct Config {
 	pub log_path: String,
 	pub pol_delay: f32,
 	
+	/// Multiplier for Warframe's in-game UI scale (1.0 = 100%).
+	pub wf_ui_scale: f32,
+	
+	/// Enable the in-game overlay window.
+	pub overlay_enabled: bool,
+	/// If true, the overlay won't intercept mouse input.
+	pub overlay_mouse_passthrough: bool,
+	/// Overlay background opacity for the info panel (0.0 - 1.0).
+	pub overlay_opacity: f32,
+	/// Overlay margin from the top-left of the game window (in points).
+	pub overlay_margin: f32,
+	
 	pub relicreward_valuedforma: bool,
-
-	// UI / i18n
-	pub ui_locale: String,
-	pub ui_zoom_factor: f32,
-	pub ui_mode: UiMode,
-	pub overlay_click_through: bool,
 }
 
 impl Config {
@@ -63,12 +59,13 @@ impl Default for Config {
 			log_path: dirs::cache_dir().unwrap().join("Warframe/EE.log").to_string_lossy().to_string(),
 			pol_delay: 3.0,
 			
+			wf_ui_scale: 1.0,
+			overlay_enabled: true,
+			overlay_mouse_passthrough: true,
+			overlay_opacity: 0.65,
+			overlay_margin: 16.0,
+			
 			relicreward_valuedforma: true,
-
-			ui_locale: "en-US".to_string(),
-			ui_zoom_factor: 1.0,
-			ui_mode: UiMode::Window,
-			overlay_click_through: true,
 		}
 	}
 }

@@ -32,7 +32,8 @@ impl IePol {
 					
 					's: {
 						let Some(image) = crate::capture::capture() else {break 's};
-						let header_text = ie.util_party_header_text(image.as_image()).to_ascii_lowercase();
+						let ui_scale = { crate::config().wf_ui_scale }; 
+						let header_text = ie.util_party_header_text_scaled(image.as_image(), ui_scale).to_ascii_lowercase();
 						let image = Arc::new(image);
 						
 						println!("header text: {header_text}");
