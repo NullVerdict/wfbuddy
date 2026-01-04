@@ -7,6 +7,7 @@ pub mod capture;
 // mod logwatcher;
 mod iepol;
 mod module;
+mod overlay;
 mod ui;
 pub use ui::UiExt;
 mod config;

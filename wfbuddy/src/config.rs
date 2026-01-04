@@ -13,6 +13,27 @@ pub struct Config {
 	pub pol_delay: f32,
 	
 	pub relicreward_valuedforma: bool,
+
+	/// Show a compact, always-on-top overlay with the currently detected relic rewards.
+	///
+	/// Rendered as a separate borderless viewport/window.
+	pub overlay_relicreward_enabled: bool,
+
+	/// If enabled, the overlay viewport follows the selected game window.
+	pub overlay_follow_game_window: bool,
+
+	/// Vertical anchor of the overlay within the game window (0.0 = top, 1.0 = bottom).
+	///
+	/// Default is slightly below the in-game reward cards.
+	pub overlay_y_ratio: f32,
+
+	/// Pixel margin used when clamping the overlay inside the game window.
+	pub overlay_margin_px: f32,
+
+	/// Make the overlay window ignore mouse input (click-through).
+	///
+	/// Note: if you set this to true, the overlay cannot be interacted with.
+	pub overlay_mouse_passthrough: bool,
 }
 
 impl Config {
@@ -86,6 +107,12 @@ impl Default for Config {
 			pol_delay: 3.0,
 			
 			relicreward_valuedforma: true,
+
+			overlay_relicreward_enabled: true,
+			overlay_follow_game_window: true,
+			overlay_y_ratio: crate::overlay::OVERLAY_DEFAULT_Y_RATIO_BELOW_REWARDS,
+			overlay_margin_px: 16.0,
+			overlay_mouse_passthrough: true,
 		}
 	}
 }

@@ -46,6 +46,9 @@ pub struct WFBuddy {
 	modules: Vec<Box<dyn Module>>,
 	uniform: crate::Uniform,
 	tab: Tab,
+
+	last_overlay_follow_check: std::time::Instant,
+	overlay_game_rect: Option<(i32, i32, u32, u32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +86,117 @@ impl WFBuddy {
 			],
 			uniform,
 			tab: Tab::Home,
+
+			last_overlay_follow_check: std::time::Instant::now() - Duration::from_secs(10),
+			overlay_game_rect: None,
 		})
+	}
+
+	fn update_overlay_game_rect(&mut self) {
+		let cfg = crate::config_read();
+		if !cfg.overlay_follow_game_window {
+			return;
+		}
+		// Avoid enumerating windows every frame.
+		if self.last_overlay_follow_check.elapsed() < Duration::from_millis(500) {
+			return;
+		}
+		self.last_overlay_follow_check = std::time::Instant::now();
+		self.overlay_game_rect = crate::capture::window_rect_specific(&cfg.app_id);
+	}
+
+	fn show_overlay_viewport(&mut self, parent_ctx: &egui::Context) {
+		let cfg = crate::config_read().clone();
+		if !cfg.overlay_relicreward_enabled {
+			return;
+		}
+
+		self.update_overlay_game_rect();
+
+		let cards: Vec<crate::overlay::OverlayCard> = self
+			.modules
+			.iter()
+			.flat_map(|m| m.overlay_cards())
+			.collect();
+		if cards.is_empty() {
+			// If we stop calling show_viewport_* the child window will be closed.
+			return;
+		}
+
+		let game_rect = self.overlay_game_rect;
+
+		let viewport_id = egui::ViewportId::from_hash_of("wfbuddy.relicreward_overlay");
+		let builder = egui::ViewportBuilder::default()
+			.with_title("WFBuddy Overlay")
+			.with_decorations(false)
+			.with_resizable(false)
+			.with_transparent(true)
+			.with_window_level(egui::viewport::WindowLevel::AlwaysOnTop)
+			.with_mouse_passthrough(cfg.overlay_mouse_passthrough)
+			.with_inner_size(egui::vec2(crate::overlay::OVERLAY_WIDTH, crate::overlay::OVERLAY_HEIGHT));
+
+		parent_ctx.show_viewport_deferred(viewport_id, builder, move |ctx, _class| {
+			// Semi-transparent background, borderless.
+			let mut style = (*ctx.style()).clone();
+			style.visuals.window_fill = egui::Color32::from_black_alpha(160);
+			ctx.set_style(style);
+
+			// Follow the game window (coordinates are in logical points).
+			if cfg.overlay_follow_game_window {
+				if let Some((x, y, w, h)) = game_rect {
+					let ppp = ctx.pixels_per_point();
+					let (x, y, w, h) = (
+						x as f32 / ppp,
+						y as f32 / ppp,
+						w as f32 / ppp,
+						h as f32 / ppp,
+					);
+					let overlay_w = crate::overlay::OVERLAY_WIDTH;
+					let overlay_h = crate::overlay::OVERLAY_HEIGHT;
+					let margin = cfg.overlay_margin_px / ppp;
+					let mut px = x + (w - overlay_w) * 0.5;
+					let mut py = y + h * cfg.overlay_y_ratio - overlay_h * 0.5;
+					// Clamp inside the game window.
+					px = px.clamp(x + margin, x + w - overlay_w - margin);
+					py = py.clamp(y + margin, y + h - overlay_h - margin);
+					ctx.send_viewport_cmd(egui::viewport::ViewportCommand::OuterPosition(egui::pos2(px, py)));
+				}
+			}
+
+			egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
+				ui.horizontal(|ui| {
+					ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
+					for card in cards {
+						let frame = egui::Frame::none()
+							.fill(egui::Color32::from_black_alpha(120))
+							.stroke(ui.visuals().window_stroke)
+							.rounding(egui::Rounding::same(10.0))
+							.inner_margin(egui::Margin::same(10.0));
+						frame.show(ui, |ui| {
+							ui.set_min_width(210.0);
+							ui.label(egui::RichText::new(&card.name).strong());
+							ui.add_space(2.0);
+							ui.horizontal(|ui| {
+								ui.label(format!("{}p", card.platinum));
+								ui.label("•");
+								ui.label(format!("{}d", card.ducats));
+							});
+							if card.owned > 0 {
+								ui.label(format!("Owned: {}", card.owned));
+							} else {
+								ui.label("");
+							}
+							ui.add_space(2.0);
+							if card.vaulted {
+								ui.label(egui::RichText::new("Vaulted").strong());
+							} else {
+								ui.label(egui::RichText::new("Not vaulted").weak());
+							}
+						});
+					}
+				});
+			});
+		});
 	}
 	
 	fn ui(&mut self, ui: &mut egui::Ui) {
@@ -131,6 +244,7 @@ impl eframe::App for WFBuddy {
 		}
 		
 		egui::CentralPanel::default().show(ctx, |ui| self.ui(ui));
+		self.show_overlay_viewport(ctx);
 		
 		// Avoid pegging a CPU core by repainting every frame.
 		// We repaint often enough to keep timers (poll countdown) responsive.

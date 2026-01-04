@@ -95,20 +95,19 @@ impl Data {
 			.map(|v| (v.id.clone(), v.i18n.en.name.clone()))
 			.collect::<HashMap<_, _>>();
 
-		// Map Warframe "uniqueName" (gameRef) -> English display name.
-		// This lets us bridge PublicExport rewards (uniqueName paths) to market item names.
-		let game_ref_to_name = items
-			.data
-			.iter()
-			.filter_map(|v| v.game_ref.as_ref().map(|gr| (gr.clone(), v.i18n.en.name.clone())))
-			.collect::<HashMap<_, _>>();
-
 		let mut s = Self {
 			platinum_values: HashMap::new(),
 			ducat_values: HashMap::new(),
 			relic_items: HashSet::new(),
 			vaulted_items: HashSet::new(),
 		};
+
+		// Populate vaulted status using WarframeStat's static processing dataset.
+		// We intentionally keep this best-effort: if the endpoint is unavailable
+		// we still want the app to work.
+		if let Ok(vaulted) = fetch_vaulted_items() {
+			s.vaulted_items = vaulted;
+		}
 
 		for v in &ducats.payload.previous_hour {
 			let name = name_map
@@ -118,90 +117,6 @@ impl Data {
 			s.platinum_values.insert(name.clone(), v.wa_price);
 			s.ducat_values.insert(name.clone(), v.ducats);
 			s.relic_items.insert(name);
-		}
-
-		// Best-effort: augment with PublicExport relic rewards and compute vaulted items.
-		// If any of this fails (network, parsing, format changes), we keep market prices working.
-		if let Ok(publicexport) = schema::publicexport::PublicExport::new() {
-			let relicarcane_res = (|| -> Result<schema::publicexport::relicarcane::RelicArcane> {
-				let mut res = ureq::get(&publicexport.relic_arcane_url)
-					.call()
-					.context("GET PublicExport ExportRelicArcane")?;
-				Ok(res
-					.body_mut()
-					.read_json::<schema::publicexport::relicarcane::RelicArcane>()
-					.context("Decode PublicExport ExportRelicArcane JSON")?)
-			})();
-
-			match relicarcane_res {
-				Ok(relicarcane) => {
-					let droptable = match schema::droptable::downloaded_relic_names() {
-						Ok(set) if !set.is_empty() => Some(set),
-						Ok(_) => {
-							log::warn!("Droptables returned no relics; skipping vaulted detection");
-							None
-						}
-						Err(err) => {
-							log::warn!("Failed to download/parse droptables; skipping vaulted detection: {err:#}");
-							None
-						}
-					};
-
-					let mut vaulted_relics: HashSet<String> = HashSet::new();
-					let mut item_relics: HashMap<String, Vec<String>> = HashMap::new();
-
-					for entry in relicarcane.items {
-						let schema::publicexport::relicarcane::Item::Relic(relic) = entry else { continue };
-						let relic_name = relic.name;
-
-						if let Some(active) = droptable.as_ref() {
-							if !active.contains(&relic_name) {
-								vaulted_relics.insert(relic_name.clone());
-							}
-						}
-
-						for reward in relic.relic_rewards {
-							let Some(base) = game_ref_to_name.get(&reward.reward_name) else {
-								log::debug!("No warframe.market mapping for gameRef {}", reward.reward_name);
-								continue;
-							};
-
-							let count = reward.item_count.max(1) as u32;
-							let base_name = base.clone();
-							s.relic_items.insert(base_name.clone());
-							item_relics.entry(base_name.clone()).or_default().push(relic_name.clone());
-
-							if count > 1 {
-								let multi_name = format!("{count} X {base_name}");
-								s.relic_items.insert(multi_name.clone());
-								item_relics.entry(multi_name.clone()).or_default().push(relic_name.clone());
-
-								// If we have single-item values, derive multi values.
-								if let Some(p) = s.platinum_values.get(&base_name).copied() {
-									s.platinum_values.insert(multi_name.clone(), p * count as f32);
-								}
-								if let Some(d) = s.ducat_values.get(&base_name).copied() {
-									s.ducat_values.insert(multi_name, d * count);
-								}
-							}
-						}
-					}
-
-					// Only compute vaulted items if we successfully loaded droptables.
-					if droptable.is_some() {
-						for (item, relics) in item_relics {
-							if relics.iter().all(|r| vaulted_relics.contains(r)) {
-								s.vaulted_items.insert(item);
-							}
-						}
-					}
-				}
-				Err(err) => {
-					log::warn!("Failed to load PublicExport relic data; skipping vaulted detection: {err:#}");
-				}
-			}
-		} else {
-			log::warn!("Failed to initialize PublicExport; skipping vaulted detection");
 		}
 
 		// Ensure Forma entries exist even if the remote feed changes.
@@ -280,4 +195,30 @@ impl Data {
 
 		min_name.to_string()
 	}
+}
+
+/// Best-effort fetch of vaulted status from WarframeStat.
+///
+/// We use the processing dataset at `/items` and request only the fields we
+/// need to keep the payload small.
+fn fetch_vaulted_items() -> Result<HashSet<String>> {
+	let mut res = ureq::get("https://api.warframestat.us/items")
+		.query("only", "name,vaulted")
+		.call()
+		.context("GET https://api.warframestat.us/items?only=name,vaulted")?;
+
+	let items = res
+		.body_mut()
+		.read_json::<Vec<schema::vaulted::WarframeStatItem>>()
+		.context("Decode vaulted items JSON")?;
+
+	let mut set = HashSet::new();
+	for item in items {
+		if item.vaulted.unwrap_or(false) {
+			if let Some(name) = item.name {
+				set.insert(name);
+			}
+		}
+	}
+	Ok(set)
 }

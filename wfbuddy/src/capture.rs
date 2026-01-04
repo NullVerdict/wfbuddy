@@ -23,10 +23,41 @@ pub fn capture_specific(window_id: &str) -> Option<ie::OwnedImage> {
 	Some(img)
 }
 
+/// Find the selected game window and return its position and size.
+///
+/// The returned tuple is `(x, y, width, height)` in pixels.
+pub fn window_rect_specific(window_id: &str) -> Option<(i32, i32, u32, u32)> {
+	let windows = xcap::Window::all().ok()?;
+	let needle = window_id.to_lowercase();
+
+	let window = windows.iter().find(|window| {
+		window
+			.app_name()
+			.ok()
+			.is_some_and(|name| name.eq_ignore_ascii_case(window_id))
+			|| window
+				.title()
+				.ok()
+				.is_some_and(|title| title.to_lowercase().contains(&needle))
+	})?;
+
+	Some((
+		window.x().ok()?,
+		window.y().ok()?,
+		window.width().ok()?,
+		window.height().ok()?,
+	))
+}
+
 /// Reads the config and captures the selected window.
 ///
 /// We clone the window id so we don't hold the config lock during capture.
 pub fn capture() -> Option<ie::OwnedImage> {
 	let window_id = crate::config_read().app_id.clone();
 	capture_specific(&window_id)
+}
+
+pub fn window_rect() -> Option<(i32, i32, u32, u32)> {
+	let window_id = crate::config_read().app_id.clone();
+	window_rect_specific(&window_id)
 }
