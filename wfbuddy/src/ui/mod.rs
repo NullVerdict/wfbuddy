@@ -248,7 +248,7 @@ impl WFBuddy {
 											.strong()
 											.size(15.0),
 										)
-										.wrap(true),
+									.wrap(),
 									);
 
 									// Values row
