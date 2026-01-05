@@ -10,39 +10,21 @@ use anyhow::{Context, Result};
 mod schema;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Data {
 	pub platinum_values: HashMap<String, f32>,
 	pub ducat_values: HashMap<String, u32>,
 	pub relic_items: HashSet<String>,
 	pub vaulted_items: HashSet<String>,
-	#[serde(default)]
+	/// Best-effort item metadata from WarframeStat (type/category/etc).
 	pub item_meta: HashMap<String, ItemMeta>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ItemMeta {
-	/// Item type from WarframeStat (field name `type`).
-	///
-	/// Examples include things like `Blueprint`, `PrimePart`, etc.
 	pub item_type: Option<String>,
 	pub category: Option<String>,
 	pub product_category: Option<String>,
-}
-
-impl ItemMeta {
-	/// Best-effort Russian label for the item's `type`.
-	///
-	/// The game client often doesn't show this explicitly for relic rewards.
-	pub fn type_ru(&self) -> Option<&'static str> {
-		match self.item_type.as_deref()? {
-			"Blueprint" => Some("Чертёж"),
-			"PrimePart" => Some("Прайм-часть"),
-			"PrimeSet" => Some("Прайм-набор"),
-			"Relic" => Some("Реликвия"),
-			"Mod" => Some("Мод"),
-			_ => None,
-		}
-	}
 }
 
 impl Default for Data {
@@ -132,9 +114,9 @@ impl Data {
 			item_meta: HashMap::new(),
 		};
 
-		// Populate vaulted status + item metadata using WarframeStat's processing dataset.
+		// Populate vaulted status and metadata using WarframeStat's processing dataset.
 		// Best-effort: if the endpoint is unavailable we still want the app to work.
-		if let Ok((vaulted, meta)) = fetch_warframestat_items() {
+		if let Ok((vaulted, meta)) = fetch_vaulted_items_and_meta() {
 			s.vaulted_items = vaulted;
 			s.item_meta = meta;
 		}
@@ -157,10 +139,6 @@ impl Data {
 		out.vaulted_items.extend(s.vaulted_items);
 		out.item_meta.extend(s.item_meta);
 		Ok(out)
-	}
-
-	pub fn item_meta(&self, name: &str) -> Option<&ItemMeta> {
-		self.item_meta.get(name)
 	}
 
 	/// Fetch data from the network; if it fails, fall back to a cached copy (if available).
@@ -236,7 +214,7 @@ impl Data {
 ///
 /// We use the processing dataset at `/items` and request only the fields we
 /// need to keep the payload small.
-fn fetch_warframestat_items() -> Result<(HashSet<String>, HashMap<String, ItemMeta>)> {
+fn fetch_vaulted_items_and_meta() -> Result<(HashSet<String>, HashMap<String, ItemMeta>)> {
 	let mut res = ureq::get("https://api.warframestat.us/items")
 		.query("only", "name,vaulted,type,category,productCategory")
 		.call()
@@ -254,16 +232,11 @@ fn fetch_warframestat_items() -> Result<(HashSet<String>, HashMap<String, ItemMe
 		if item.vaulted.unwrap_or(false) {
 			vaulted.insert(name.clone());
 		}
-		if item.item_type.is_some() || item.category.is_some() || item.product_category.is_some() {
-			meta.insert(
-				name,
-				ItemMeta {
-					item_type: item.item_type,
-					category: item.category,
-					product_category: item.product_category,
-				},
-			);
-		}
+		meta.insert(name, ItemMeta {
+			item_type: item.item_type,
+			category: item.category,
+			product_category: item.product_category,
+		});
 	}
 	Ok((vaulted, meta))
 }

@@ -94,6 +94,33 @@ static ICON_COMMON: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {crate:
 static ICON_UNCOMMON: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {crate::OwnedImage::from_png_mask(include_bytes!("../asset/icon_uncommon.png"), 250).unwrap()});
 static ICON_RARE: LazyLock<(OwnedImage, OwnedMask)> = LazyLock::new(|| {crate::OwnedImage::from_png_mask(include_bytes!("../asset/icon_rare.png"), 250).unwrap()});
 
+/// Cheap "are we on the rewards screen" check.
+///
+/// This avoids OCR by template-matching the rarity icons strip.
+///
+/// Expects an image with a height of 1080.
+pub(crate) fn is_screen(image: Image, _theme: Theme) -> bool {
+	const REWARDS_AREA_WIDTH: u32 = 962;
+	const RARITY_ICON_Y: u32 = 459;
+	const RARITY_ICON_SIZE: u32 = 40;
+	const ICON_SCAN_THRESHOLD: f32 = 0.24;
+
+	let image = image.trimmed_centerh(REWARDS_AREA_WIDTH);
+	let max_x = image.width().saturating_sub(RARITY_ICON_SIZE);
+	for x in (0..=max_x).step_by(8) {
+		let sub = image.sub_image(x, RARITY_ICON_Y, RARITY_ICON_SIZE, RARITY_ICON_SIZE);
+		let mut best = f32::INFINITY;
+		for icon in [&ICON_COMMON, &ICON_UNCOMMON, &ICON_RARE] {
+			let dev = sub.average_deviation_masked(icon.0.as_image(), Mask(&icon.1.0));
+			best = best.min(dev);
+		}
+		if best < ICON_SCAN_THRESHOLD {
+			return true;
+		}
+	}
+	false
+}
+
 // Gets the amount of rewards there are, not always equal to the amount of people
 // in the party if someone forgot to select a relic.
 fn reward_count(image: Image) -> u32 {

@@ -123,33 +123,33 @@ impl WFBuddy {
 			return;
 		}
 
-		// Size the overlay to the current number of reward cards.
-		let card_count = cards.len().max(1);
-		let overlay_w = crate::overlay::OVERLAY_CARD_WIDTH * card_count as f32
-			+ crate::overlay::OVERLAY_CARD_SPACING_X * (card_count.saturating_sub(1) as f32)
-			+ 20.0; // a bit of padding to avoid clipping at some DPIs
-		let overlay_h = crate::overlay::OVERLAY_HEIGHT_EST;
-
 		let game_rect = self.overlay_game_rect;
+
+		// Size the overlay to the number of reward cards (AlecaFrame-style bar).
+		let card_count = cards.len().clamp(1, 4) as f32;
+		let overlay_w = crate::overlay::BAR_PADDING * 2.0
+			+ card_count * crate::overlay::CARD_W
+			+ (card_count - 1.0) * crate::overlay::CARD_SPACING;
+		let overlay_h = crate::overlay::BAR_H;
 
 		let viewport_id = egui::ViewportId::from_hash_of("wfbuddy.relicreward_overlay");
 		let builder = egui::ViewportBuilder::default()
 			.with_title("WFBuddy Overlay")
 			.with_decorations(false)
 			.with_resizable(false)
-			.with_transparent(true)
+			// Transparent windows are not available on some GL configs; keep it opaque.
+			.with_transparent(false)
 			.with_window_level(egui::viewport::WindowLevel::AlwaysOnTop)
 			.with_mouse_passthrough(cfg.overlay_mouse_passthrough)
 			.with_inner_size(egui::vec2(overlay_w, overlay_h));
 
 		parent_ctx.show_viewport_deferred(viewport_id, builder, move |ctx, _class| {
-			// Semi-transparent background, borderless.
-			let mut style = (*ctx.style()).clone();
-			style.visuals.window_fill = egui::Color32::from_black_alpha(160);
-			ctx.set_style(style);
+			// Keep the viewport sized correctly even if reward count changes.
+			ctx.send_viewport_cmd(egui::viewport::ViewportCommand::InnerSize(egui::vec2(overlay_w, overlay_h)));
 
-			// Follow the game window (coordinates are in logical points).
-			if cfg.overlay_follow_game_window && let Some((x, y, w, h)) = game_rect {
+			// Follow the game window (viewport commands use logical points).
+			if cfg.overlay_follow_game_window {
+				if let Some((x, y, w, h)) = game_rect {
 					let ppp = ctx.pixels_per_point();
 					let (x, y, w, h) = (
 						x as f32 / ppp,
@@ -157,57 +157,78 @@ impl WFBuddy {
 						w as f32 / ppp,
 						h as f32 / ppp,
 					);
-					let overlay_w = overlay_w;
-					let overlay_h = overlay_h;
 					let margin = cfg.overlay_margin_px / ppp;
 					let mut px = x + (w - overlay_w) * 0.5;
 					let mut py = y + h * cfg.overlay_y_ratio - overlay_h * 0.5;
-					// Clamp inside the game window.
 					px = px.clamp(x + margin, x + w - overlay_w - margin);
 					py = py.clamp(y + margin, y + h - overlay_h - margin);
 					ctx.send_viewport_cmd(egui::viewport::ViewportCommand::OuterPosition(egui::pos2(px, py)));
 				}
+			}
+
+			// Simple ellipsis helper (avoids relying on egui API differences).
+			fn ellipsize(s: &str, max_chars: usize) -> String {
+				let mut it = s.chars();
+				let mut out = String::new();
+				for _ in 0..max_chars {
+					match it.next() {
+						Some(ch) => out.push(ch),
+						None => return s.to_string(),
+					}
+				}
+				if it.next().is_some() {
+					out.push('…');
+				}
+				out
+			}
 
 			egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
-				ui.horizontal(|ui| {
-					ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
+				let bar = egui::Frame::NONE
+					.fill(egui::Color32::from_rgb(18, 18, 22))
+					.stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(70)))
+					.corner_radius(egui::CornerRadius::same(12))
+					.inner_margin(egui::Margin::same(crate::overlay::BAR_PADDING));
+
+				bar.show(ui, |ui| {
+					ui.spacing_mut().item_spacing = egui::vec2(crate::overlay::CARD_SPACING, 0.0);
+					ui.horizontal_wrapped(|ui| {
 						for card in cards.iter() {
-						let frame = egui::Frame::NONE
-							.fill(egui::Color32::from_black_alpha(120))
-							.stroke(ui.visuals().window_stroke)
-							.corner_radius(egui::CornerRadius::same(10))
-							.inner_margin(egui::Margin::same(10));
-						frame.show(ui, |ui| {
-							ui.set_min_width(210.0);
-						ui.label(egui::RichText::new(card.name.as_str()).strong());
-						if let Some(ru) = card.item_type_ru {
-							if let Some(en) = card.item_type.as_deref() {
-								ui.label(egui::RichText::new(format!("{ru} ({en})")).weak());
-							} else {
-								ui.label(egui::RichText::new(ru).weak());
-							}
-						} else if let Some(en) = card.item_type.as_deref() {
-							ui.label(egui::RichText::new(format!("Type: {en}")).weak());
-						}
-						ui.add_space(2.0);
-							ui.horizontal(|ui| {
-								ui.label(format!("{}p", card.platinum));
-								ui.label("•");
-								ui.label(format!("{}d", card.ducats));
+							let card_frame = egui::Frame::NONE
+								.fill(egui::Color32::from_rgb(28, 28, 34))
+								.stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(85)))
+								.corner_radius(egui::CornerRadius::same(10))
+								.inner_margin(egui::Margin::symmetric(10, 8));
+							card_frame.show(ui, |ui| {
+								ui.set_min_width(crate::overlay::CARD_W);
+								ui.set_min_height(crate::overlay::CARD_H);
+								ui.set_max_width(crate::overlay::CARD_W);
+								let title = ellipsize(&card.name, 28);
+								ui.label(egui::RichText::new(title).strong());
+								if let Some(kind) = &card.kind {
+									ui.label(egui::RichText::new(kind).weak());
+								} else {
+									ui.add_space(18.0);
+								}
+								ui.add_space(4.0);
+								ui.horizontal(|ui| {
+									ui.label(format!("{:.1}p", card.platinum));
+									ui.label("•");
+									ui.label(format!("{}d", card.ducats));
+								});
+								if card.owned > 0 {
+									ui.label(format!("Owned: {}", card.owned));
+								} else {
+									ui.add_space(18.0);
+								}
+								ui.add_space(4.0);
+								if card.vaulted {
+									ui.label(egui::RichText::new("Vaulted").strong());
+								} else {
+									ui.label(egui::RichText::new("Not vaulted").weak());
+								}
 							});
-							if card.owned > 0 {
-								ui.label(format!("Owned: {}", card.owned));
-							} else {
-								ui.label("");
-							}
-							ui.add_space(2.0);
-							if card.vaulted {
-								ui.label(egui::RichText::new("Vaulted").strong());
-							} else {
-								ui.label(egui::RichText::new("Not vaulted").weak());
-							}
-						});
-					}
+						}
+					});
 				});
 			});
 		});

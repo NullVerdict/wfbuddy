@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 /// Minimal item representation from https://api.warframestat.us/items
 ///
-/// We request `only=name,vaulted,type,category,productCategory`.
+/// We request a small set of fields via the `only=` query parameter.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WarframeStatItem {
 	pub name: Option<String>,

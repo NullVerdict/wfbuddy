@@ -10,6 +10,8 @@ use std::{
 pub enum IePolWatchType {
 	/// Lowercased string we want to match against the Party Header Text.
 	PartyHeaderText(String),
+	/// Cheap screen detector for the Void Fissure rewards screen (no OCR).
+	RelicRewardScreen,
 }
 
 pub type EventReceiver = Receiver<Arc<ie::OwnedImage>>;
@@ -54,7 +56,6 @@ impl IePol {
 
 				// 2) Do the expensive part without holding locks.
 				if let Some(image) = crate::capture::capture() {
-					let header_text = ie.util_party_header_text(image.as_image()).to_ascii_lowercase();
 					let image = Arc::new(image);
 
 					// Snapshot watchers so sending can't block the watcher lock.
@@ -65,13 +66,36 @@ impl IePol {
 							.clone()
 					};
 
+					// Only compute expensive OCR if any watcher needs it.
+					let needs_header_ocr = watchers.iter().any(|(typ, _)| matches!(typ, IePolWatchType::PartyHeaderText(_)));
+					let header_text = if needs_header_ocr {
+						Some(ie.util_party_header_text(image.as_image()).to_ascii_lowercase())
+					} else {
+						None
+					};
+
+					// Cheap screen detection (no OCR).
+					let needs_relic_screen = watchers.iter().any(|(typ, _)| matches!(typ, IePolWatchType::RelicRewardScreen));
+					let on_relic_screen = if needs_relic_screen {
+						Some(ie.relicreward_is_screen(image.as_image()))
+					} else {
+						None
+					};
+
 					for (typ, tx) in watchers {
 						match typ {
-							IePolWatchType::PartyHeaderText(text)
-								if matches(&header_text, &text, 3) => {
+							IePolWatchType::PartyHeaderText(text) => {
+								if let Some(ref header) = header_text {
+									if matches(header, &text, 3) {
+										let _ = tx.send(image.clone());
+									}
+								}
+							}
+							IePolWatchType::RelicRewardScreen => {
+								if on_relic_screen.unwrap_or(false) {
 									let _ = tx.send(image.clone());
 								}
-							_ => {}
+							}
 						}
 					}
 				}
@@ -105,6 +129,7 @@ impl IePol {
 			IePolWatchType::PartyHeaderText(text) => {
 				IePolWatchType::PartyHeaderText(text.to_ascii_lowercase())
 			}
+			IePolWatchType::RelicRewardScreen => IePolWatchType::RelicRewardScreen,
 		};
 
 		self.watching
