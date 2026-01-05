@@ -16,9 +16,7 @@ regex = "1.12.2"
 notify = "8.2.0"
 anyhow = "1.0.100"
 egui = "0.33.3"
-# Enable both renderers so we can fall back to wgpu when transparent windows
-# are not supported by the system's OpenGL config.
-eframe = { version = "0.33.3", features = ["wgpu"] }
+eframe = "0.33.3"
 dirs = "6.0.0"
 serde = {version = "1.0.228", features = ["derive"]}
 serde_json = "1.0.145"

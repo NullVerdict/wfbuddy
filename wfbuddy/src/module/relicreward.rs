@@ -8,8 +8,10 @@ pub struct RelicReward {
 	
 	current_rewards: Vec<Reward>,
 	selected_rewards: BTreeMap<String, u32>,
-	/// Safety net: if we don't observe the screen transition away from the
-	/// reward picker (OCR miss, alt-tab, etc.), clear the overlay after this.
+	/// When set, the overlay (and current rewards) will be cleared after this instant.
+	///
+	/// This prevents the overlay from "sticking" forever if OCR misses the
+	/// transition away from the reward screen.
 	overlay_expires_at: Option<Instant>,
 }
 
@@ -31,30 +33,24 @@ impl RelicReward {
 	}
 	
 	fn check_rewards(&mut self, rewards: ie::screen::relicreward::Rewards) {
+		// Refresh the overlay TTL. Use the in-game timer as a hint, with a small
+		// buffer, and clamp to a sensible range.
+		let ttl_secs = (rewards.timer as u64).saturating_add(6).max(10).min(90);
+		self.overlay_expires_at = Some(Instant::now() + Duration::from_secs(ttl_secs));
+
 		self.current_rewards = rewards.rewards
 			.into_iter()
 			.map(|reward| {
 				let name = self.uniform.data.find_item_name(&reward.name);
-				let platinum = self.uniform.data.platinum(&name);
-				let ducats = self.uniform.data.ducats(&name);
-				let vaulted = self.uniform.data.is_vaulted(&name);
 				Reward {
-					vaulted,
-					platinum,
-					ducats,
+					vaulted: self.uniform.data.vaulted_items.contains(&name),
+					platinum: self.uniform.data.platinum_values.get(&name).copied().unwrap_or_default(),
+					ducats: self.uniform.data.ducat_values.get(&name).copied().unwrap_or_default(),
 					owned: reward.owned,
 					name,
 				}
 			})
 			.collect::<Vec<_>>();
-
-		// The relic reward screen has a visible countdown. In practice, OCR can
-		// miss the final "picked" screen (or the user can leave the screen early),
-		// which previously caused the overlay to stick forever.
-		//
-		// We use the in-game timer as a best-effort expiration for the overlay.
-		self.overlay_expires_at = Some(Instant::now() + Duration::from_secs(rewards.timer as u64 + 3));
-
 		// Poll again shortly before the timer hits 0, but never underflow.
 		let delay_secs = rewards.timer.saturating_sub(1) as u64;
 		self.uniform.iepol.delay_till(Instant::now() + Duration::from_secs(delay_secs));
@@ -63,9 +59,8 @@ impl RelicReward {
 	fn check_selected(&mut self, image: std::sync::Arc<ie::OwnedImage>) {
 		let selected = self.uniform.ie.relicreward_get_selected(image.as_image());
 		if let Some(reward) = self.current_rewards.get(selected as usize) {
-			let amount = if reward.name.starts_with("2 X ") { 2 } else { 1 };
-			log::debug!("incrementing {} by {amount} as the picked index was {selected}", reward.name);
-			*self.selected_rewards.entry(reward.name.clone()).or_insert(0) += amount;
+			log::debug!("incrementing {} as the picked index was {selected}", reward.name);
+			*self.selected_rewards.entry(reward.name.clone()).or_insert(0) += 1;
 		}
 		
 		self.current_rewards.clear();
@@ -110,6 +105,17 @@ impl super::Module for RelicReward {
 			for (i, ui) in uis.iter_mut().enumerate() {
 				let reward = &self.current_rewards[i];
 				ui.label(&reward.name);
+				if let Some(meta) = self.uniform.data.item_meta(&reward.name) {
+					if let Some(ru) = meta.type_ru() {
+						if let Some(en) = meta.item_type.as_deref() {
+							ui.label(format!("{ru} ({en})"));
+						} else {
+							ui.label(ru);
+						}
+					} else if let Some(en) = meta.item_type.as_deref() {
+						ui.label(format!("Type: {en}"));
+					}
+				}
 				let plat = if !reward.name.contains("Forma Blueprint") || valued_forma {
 					reward.platinum
 				} else {
@@ -158,6 +164,7 @@ impl super::Module for RelicReward {
 		self.current_rewards
 			.iter()
 			.map(|reward| {
+				let meta = self.uniform.data.item_meta(&reward.name);
 				let plat = if !reward.name.contains("Forma Blueprint") || valued_forma {
 					reward.platinum
 				} else {
@@ -166,6 +173,8 @@ impl super::Module for RelicReward {
 				let picked = self.selected_rewards.get(&reward.name).copied().unwrap_or(0);
 				crate::overlay::OverlayCard {
 					name: reward.name.clone(),
+					item_type: meta.and_then(|m| m.item_type.clone()),
+					item_type_ru: meta.and_then(|m| m.type_ru()),
 					vaulted: reward.vaulted,
 					platinum: plat,
 					ducats: reward.ducats,
@@ -176,13 +185,12 @@ impl super::Module for RelicReward {
 	}
 	
 	fn tick(&mut self) {
-		// Expire the overlay even if OCR misses the screen transition.
-		if let Some(expires_at) = self.overlay_expires_at
-			&& Instant::now() >= expires_at
-		{
-			log::debug!("relic reward overlay expired; clearing cards");
-			self.current_rewards.clear();
-			self.overlay_expires_at = None;
+		// Auto-hide / clear stale overlay state.
+		if let Some(exp) = self.overlay_expires_at {
+			if Instant::now() > exp {
+				self.current_rewards.clear();
+				self.overlay_expires_at = None;
+			}
 		}
 
 		// Drain the channel: if OCR runs faster than the UI tick, we still handle all events.

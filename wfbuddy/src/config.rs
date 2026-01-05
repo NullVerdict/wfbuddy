@@ -34,13 +34,6 @@ pub struct Config {
 	///
 	/// Note: if you set this to true, the overlay cannot be interacted with.
 	pub overlay_mouse_passthrough: bool,
-
-	/// Try to create the overlay viewport as a per-pixel transparent window.
-	///
-	/// This is a best-effort hint to the OS/graphics stack and may fail on some
-	/// systems (e.g. certain OpenGL configs). If you see logs like
-	/// "Cannot create transparent window", disable this.
-	pub overlay_transparent_window: bool,
 }
 
 impl Config {
@@ -120,7 +113,6 @@ impl Default for Config {
 			overlay_y_ratio: crate::overlay::OVERLAY_DEFAULT_Y_RATIO_BELOW_REWARDS,
 			overlay_margin_px: 16.0,
 			overlay_mouse_passthrough: true,
-			overlay_transparent_window: false,
 		}
 	}
 }

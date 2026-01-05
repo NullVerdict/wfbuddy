@@ -39,14 +39,7 @@ fn main() -> eframe::Result {
 	// Logging is controlled via RUST_LOG (e.g. RUST_LOG=debug).
 	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-	// Transparent overlay windows are sometimes unsupported with certain OpenGL
-	// configurations (you'll see logs like "Cannot create transparent window").
-	// When the user asks for transparency, prefer the wgpu renderer.
-	let cfg = config_read().clone();
-	let mut native_options = eframe::NativeOptions::default();
-	if cfg.overlay_transparent_window {
-		native_options.renderer = eframe::Renderer::Wgpu;
-	}
+	let native_options = eframe::NativeOptions::default();
 	eframe::run_native(
 		"WFBuddy",
 		native_options,

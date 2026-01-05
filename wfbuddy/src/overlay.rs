@@ -2,29 +2,17 @@
 ///
 /// The viewport is rendered as a separate, borderless native window (egui viewport).
 /// Sizes are in egui "points" (logical pixels).
+/// Estimated card width used to size the viewport (in egui points).
 ///
-/// The overlay size is computed dynamically based on the number of cards,
-/// but we keep a couple sane bounds here.
-pub const OVERLAY_MAX_WIDTH: f32 = 1260.0;
+/// The actual card uses `ui.set_min_width(210)` plus padding/margins.
+pub const OVERLAY_CARD_WIDTH: f32 = 235.0;
+pub const OVERLAY_CARD_SPACING_X: f32 = 10.0;
 
-/// We show up to 4 reward cards (same as the in-game row without scrolling).
-pub const OVERLAY_MAX_CARDS: usize = 4;
-
-/// Card dimensions in egui points.
-pub const OVERLAY_CARD_WIDTH: f32 = 255.0;
-pub const OVERLAY_CARD_HEIGHT: f32 = 118.0;
-
-/// egui stores `Margin` values as `i8` (for compactness), so keep a pixel value for that,
-/// and a `f32` version for layout calculations.
-pub const OVERLAY_PADDING_PX: i8 = 14;
-pub const OVERLAY_PADDING_F32: f32 = OVERLAY_PADDING_PX as f32;
-pub const OVERLAY_SPACING: f32 = 12.0;
-
-/// Height of the footer/status bar under the cards.
-pub const OVERLAY_FOOTER_HEIGHT: f32 = 22.0;
-
-// Includes card row + a small hint/status bar.
-pub const OVERLAY_HEIGHT: f32 = OVERLAY_CARD_HEIGHT + (OVERLAY_PADDING_F32 * 2.0) + OVERLAY_FOOTER_HEIGHT;
+/// Estimated overlay height (in egui points).
+///
+/// This is used for default positioning and viewport sizing when we can't
+/// measure content precisely (egui doesn't provide stable pre-layout sizing).
+pub const OVERLAY_HEIGHT_EST: f32 = 190.0;
 
 /// Default vertical anchor (center of the overlay) positioned just below the in-game relic reward cards.
 ///
@@ -34,12 +22,17 @@ pub const OVERLAY_HEIGHT: f32 = OVERLAY_CARD_HEIGHT + (OVERLAY_PADDING_F32 * 2.0
 ///
 /// so the row bottom is at y = 460.
 /// We place the overlay top a small gap below that, then convert to a center anchor ratio.
-pub const OVERLAY_DEFAULT_Y_RATIO_BELOW_REWARDS: f32 = (460.0 + 18.0 + (OVERLAY_HEIGHT / 2.0)) / 1080.0;
+pub const OVERLAY_DEFAULT_Y_RATIO_BELOW_REWARDS: f32 =
+	(460.0 + 18.0 + (OVERLAY_HEIGHT_EST / 2.0)) / 1080.0;
 
 /// Small, self-contained data used by the always-on-top overlay viewport.
 #[derive(Debug, Clone)]
 pub struct OverlayCard {
 	pub name: String,
+	/// Best-effort type label (e.g. "Blueprint", "PrimePart").
+	pub item_type: Option<String>,
+	/// Best-effort Russian label for `item_type`.
+	pub item_type_ru: Option<&'static str>,
 	pub vaulted: bool,
 	pub platinum: f32,
 	pub ducats: u32,
