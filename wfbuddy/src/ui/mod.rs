@@ -127,7 +127,7 @@ impl WFBuddy {
 
 		// Size the overlay to the number of reward cards (AlecaFrame-style bar).
 		let card_count = cards.len().clamp(1, 4) as f32;
-		let overlay_w = crate::overlay::BAR_PADDING * 2.0
+			let overlay_w = crate::overlay::BAR_PADDING_F32 * 2.0
 			+ card_count * crate::overlay::CARD_W
 			+ (card_count - 1.0) * crate::overlay::CARD_SPACING;
 		let overlay_h = crate::overlay::BAR_H;

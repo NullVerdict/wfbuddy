@@ -6,13 +6,17 @@
 /// Note: sizes are in egui "points" (logical pixels).
 
 /// Layout constants for the AlecaFrame-style bar.
-pub const BAR_PADDING: f32 = 12.0;
+///
+/// NOTE: `egui::Margin` stores its values as `i8` (to keep it small), so we keep
+/// padding as `i8` and expose an `f32` view for sizing math.
+pub const BAR_PADDING: i8 = 12;
+pub const BAR_PADDING_F32: f32 = BAR_PADDING as f32;
 pub const CARD_W: f32 = 220.0;
 pub const CARD_SPACING: f32 = 10.0;
 pub const CARD_H: f32 = 130.0;
 
 /// Approximate bar height (used for the default vertical anchor ratio).
-pub const BAR_H: f32 = CARD_H + BAR_PADDING * 2.0;
+pub const BAR_H: f32 = CARD_H + BAR_PADDING_F32 * 2.0;
 
 /// Default vertical anchor (center of the overlay) positioned just below the
 /// in-game relic reward cards.
