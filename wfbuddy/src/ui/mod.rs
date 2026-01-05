@@ -49,6 +49,7 @@ pub struct WFBuddy {
 
 	last_overlay_follow_check: std::time::Instant,
 	overlay_game_rect: Option<(i32, i32, u32, u32)>,
+	overlay_viewport_open: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +90,7 @@ impl WFBuddy {
 
 			last_overlay_follow_check: std::time::Instant::now() - Duration::from_secs(10),
 			overlay_game_rect: None,
+			overlay_viewport_open: false,
 		})
 	}
 
@@ -108,6 +110,15 @@ impl WFBuddy {
 	fn show_overlay_viewport(&mut self, parent_ctx: &egui::Context) {
 		let cfg = crate::config_read().clone();
 		if !cfg.overlay_relicreward_enabled {
+			// Explicitly close the viewport when toggled off.
+			if self.overlay_viewport_open {
+				let viewport_id = egui::ViewportId::from_hash_of("wfbuddy.relicreward_overlay");
+				let builder = egui::ViewportBuilder::default();
+				parent_ctx.show_viewport_deferred(viewport_id, builder, move |ctx, _class| {
+					ctx.send_viewport_cmd(egui::viewport::ViewportCommand::Close);
+				});
+				self.overlay_viewport_open = false;
+			}
 			return;
 		}
 
@@ -119,9 +130,19 @@ impl WFBuddy {
 			.flat_map(|m| m.overlay_cards())
 			.collect();
 		if cards.is_empty() {
-			// If we stop calling show_viewport_* the child window will be closed.
+			// In newer egui versions the child viewport might stay alive even if we
+			// stop calling show_viewport_*. Explicitly close it.
+			if self.overlay_viewport_open {
+				let viewport_id = egui::ViewportId::from_hash_of("wfbuddy.relicreward_overlay");
+				let builder = egui::ViewportBuilder::default();
+				parent_ctx.show_viewport_deferred(viewport_id, builder, move |ctx, _class| {
+					ctx.send_viewport_cmd(egui::viewport::ViewportCommand::Close);
+				});
+				self.overlay_viewport_open = false;
+			}
 			return;
 		}
+		self.overlay_viewport_open = true;
 
 		let game_rect = self.overlay_game_rect;
 

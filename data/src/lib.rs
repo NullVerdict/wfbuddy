@@ -114,6 +114,15 @@ impl Data {
 				.get(&v.item)
 				.with_context(|| format!("Missing name for item id {}", v.item))?
 				.clone();
+
+			// Warframe Market also lists tradable "Prime Set" items.
+			// Void Relics, however, only reward individual Prime parts / blueprints
+			// (not assembled sets), so we keep sets out of the OCR matching pool.
+			// This also prevents OCR failures like "SET" being matched to the
+			// shortest Prime Set name.
+			if is_prime_set_name(&name) {
+				continue;
+			}
 			s.platinum_values.insert(name.clone(), v.wa_price);
 			s.ducat_values.insert(name.clone(), v.ducats);
 			s.relic_items.insert(name);
@@ -157,6 +166,15 @@ impl Data {
 	/// Attempts to find the closest item name from a dirty ocr string
 	pub fn find_item_name(&self, name: &str) -> String {
 		let name = name.trim_ascii();
+		// If OCR completely fails, it sometimes returns just "SET".
+		// Sets can't appear as relic rewards, so don't try to match this to any item.
+		if name.eq_ignore_ascii_case("set") {
+			return "(unreadable)".to_string();
+		}
+		// Also avoid matching strings that end with " SET".
+		if name.to_ascii_lowercase().ends_with(" set") {
+			return "(unreadable)".to_string();
+		}
 		// When OCR returns an empty/near-empty string, *don't* guess.
 		// The old behavior (Levenshtein over all items) tends to pick the shortest
 		// item name (often "Bo Prime Set"), which makes the UI look "stuck".
@@ -197,6 +215,12 @@ impl Data {
 	}
 }
 
+fn is_prime_set_name(name: &str) -> bool {
+	// Warframe Market uses the English string "<Something> Prime Set".
+	// We only filter the canonical suffix to avoid false positives.
+	name.trim_end().ends_with(" Set")
+}
+
 /// Best-effort fetch of vaulted status from WarframeStat.
 ///
 /// We use the processing dataset at `/items` and request only the fields we
@@ -215,7 +239,10 @@ fn fetch_vaulted_items() -> Result<HashSet<String>> {
 	let mut set = HashSet::new();
 	for item in items {
 		if item.vaulted.unwrap_or(false) && let Some(name) = item.name {
-			set.insert(name);
+			// Keep vaulted sets out of the reward dataset as well.
+			if !is_prime_set_name(&name) {
+				set.insert(name);
+			}
 		}
 	}
 	Ok(set)

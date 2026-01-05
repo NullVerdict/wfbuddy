@@ -8,6 +8,9 @@ pub struct RelicReward {
 	
 	current_rewards: Vec<Reward>,
 	selected_rewards: BTreeMap<String, u32>,
+	/// Safety net: if we don't observe the screen transition away from the
+	/// reward picker (OCR miss, alt-tab, etc.), clear the overlay after this.
+	overlay_expires_at: Option<Instant>,
 }
 
 impl RelicReward {
@@ -23,6 +26,7 @@ impl RelicReward {
 			
 			current_rewards: Vec::new(),
 			selected_rewards: BTreeMap::new(),
+			overlay_expires_at: None,
 		}
 	}
 	
@@ -40,6 +44,14 @@ impl RelicReward {
 				}
 			})
 			.collect::<Vec<_>>();
+
+		// The relic reward screen has a visible countdown. In practice, OCR can
+		// miss the final "picked" screen (or the user can leave the screen early),
+		// which previously caused the overlay to stick forever.
+		//
+		// We use the in-game timer as a best-effort expiration for the overlay.
+		self.overlay_expires_at = Some(Instant::now() + Duration::from_secs(rewards.timer as u64 + 3));
+
 		// Poll again shortly before the timer hits 0, but never underflow.
 		let delay_secs = rewards.timer.saturating_sub(1) as u64;
 		self.uniform.iepol.delay_till(Instant::now() + Duration::from_secs(delay_secs));
@@ -48,11 +60,13 @@ impl RelicReward {
 	fn check_selected(&mut self, image: std::sync::Arc<ie::OwnedImage>) {
 		let selected = self.uniform.ie.relicreward_get_selected(image.as_image());
 		if let Some(reward) = self.current_rewards.get(selected as usize) {
-			log::debug!("incrementing {} as the picked index was {selected}", reward.name);
-			*self.selected_rewards.entry(reward.name.clone()).or_insert(0) += 1;
+			let amount = if reward.name.starts_with("2 X ") { 2 } else { 1 };
+			log::debug!("incrementing {} by {amount} as the picked index was {selected}", reward.name);
+			*self.selected_rewards.entry(reward.name.clone()).or_insert(0) += amount;
 		}
 		
 		self.current_rewards.clear();
+		self.overlay_expires_at = None;
 	}
 }
 
@@ -159,6 +173,15 @@ impl super::Module for RelicReward {
 	}
 	
 	fn tick(&mut self) {
+		// Expire the overlay even if OCR misses the screen transition.
+		if let Some(expires_at) = self.overlay_expires_at {
+			if Instant::now() >= expires_at {
+				log::debug!("relic reward overlay expired; clearing cards");
+				self.current_rewards.clear();
+				self.overlay_expires_at = None;
+			}
+		}
+
 		// Drain the channel: if OCR runs faster than the UI tick, we still handle all events.
 		while let Ok(image) = self.rewards_rs.try_recv() {
 			let rewards = self.uniform.ie.relicreward_get_rewards(image.as_image());
