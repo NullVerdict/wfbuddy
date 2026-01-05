@@ -149,7 +149,7 @@ impl WFBuddy {
 		// Compute a compact overlay size that hugs the content.
 		let n = cards.len().max(1).min(4);
 		let overlay_w = (
-			crate::overlay::OVERLAY_PADDING * 2.0
+			crate::overlay::OVERLAY_PADDING_F32 * 2.0
 				+ crate::overlay::OVERLAY_CARD_WIDTH * n as f32
 				+ crate::overlay::OVERLAY_SPACING * (n.saturating_sub(1) as f32)
 		)
@@ -217,7 +217,7 @@ impl WFBuddy {
 					.fill(egui::Color32::from_black_alpha(bg_alpha))
 					.stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(40)))
 					.corner_radius(egui::CornerRadius::same(18))
-					.inner_margin(egui::Margin::same(crate::overlay::OVERLAY_PADDING));
+					.inner_margin(egui::Margin::same(crate::overlay::OVERLAY_PADDING_PX));
 
 				outer.show(ui, |ui| {
 					ui.vertical(|ui| {
@@ -227,7 +227,7 @@ impl WFBuddy {
 									.fill(egui::Color32::from_black_alpha(card_alpha))
 									.stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30)))
 									.corner_radius(egui::CornerRadius::same(14))
-									.inner_margin(egui::Margin::same(12.0));
+									.inner_margin(egui::Margin::same(12));
 
 								frame.show(ui, |ui| {
 									ui.set_min_size(egui::vec2(

@@ -11,11 +11,14 @@ pub const OVERLAY_MAX_WIDTH: f32 = 1260.0;
 pub const OVERLAY_CARD_WIDTH: f32 = 260.0;
 pub const OVERLAY_CARD_MIN_HEIGHT: f32 = 150.0;
 
-pub const OVERLAY_PADDING: f32 = 14.0;
+/// egui stores `Margin` values as `i8` (for compactness), so keep a pixel value for that,
+/// and a `f32` version for layout calculations.
+pub const OVERLAY_PADDING_PX: i8 = 14;
+pub const OVERLAY_PADDING_F32: f32 = OVERLAY_PADDING_PX as f32;
 pub const OVERLAY_SPACING: f32 = 12.0;
 
 // Includes card row + a small hint/status bar.
-pub const OVERLAY_HEIGHT: f32 = OVERLAY_CARD_MIN_HEIGHT + (OVERLAY_PADDING * 2.0) + 26.0;
+pub const OVERLAY_HEIGHT: f32 = OVERLAY_CARD_MIN_HEIGHT + (OVERLAY_PADDING_F32 * 2.0) + 26.0;
 
 /// Default vertical anchor (center of the overlay) positioned just below the in-game relic reward cards.
 ///
