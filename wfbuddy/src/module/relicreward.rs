@@ -35,10 +35,13 @@ impl RelicReward {
 			.into_iter()
 			.map(|reward| {
 				let name = self.uniform.data.find_item_name(&reward.name);
+				let platinum = self.uniform.data.platinum(&name);
+				let ducats = self.uniform.data.ducats(&name);
+				let vaulted = self.uniform.data.is_vaulted(&name);
 				Reward {
-					vaulted: self.uniform.data.vaulted_items.contains(&name),
-					platinum: self.uniform.data.platinum_values.get(&name).copied().unwrap_or_default(),
-					ducats: self.uniform.data.ducat_values.get(&name).copied().unwrap_or_default(),
+					vaulted,
+					platinum,
+					ducats,
 					owned: reward.owned,
 					name,
 				}
@@ -174,12 +177,12 @@ impl super::Module for RelicReward {
 	
 	fn tick(&mut self) {
 		// Expire the overlay even if OCR misses the screen transition.
-		if let Some(expires_at) = self.overlay_expires_at {
-			if Instant::now() >= expires_at {
-				log::debug!("relic reward overlay expired; clearing cards");
-				self.current_rewards.clear();
-				self.overlay_expires_at = None;
-			}
+		if let Some(expires_at) = self.overlay_expires_at
+			&& Instant::now() >= expires_at
+		{
+			log::debug!("relic reward overlay expired; clearing cards");
+			self.current_rewards.clear();
+			self.overlay_expires_at = None;
 		}
 
 		// Drain the channel: if OCR runs faster than the UI tick, we still handle all events.

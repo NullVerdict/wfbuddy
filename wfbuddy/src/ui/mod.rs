@@ -146,73 +146,145 @@ impl WFBuddy {
 
 		let game_rect = self.overlay_game_rect;
 
+		// Compute a compact overlay size that hugs the content.
+		let n = cards.len().max(1).min(4);
+		let overlay_w = (
+			crate::overlay::OVERLAY_PADDING * 2.0
+				+ crate::overlay::OVERLAY_CARD_WIDTH * n as f32
+				+ crate::overlay::OVERLAY_SPACING * (n.saturating_sub(1) as f32)
+		)
+		.clamp(
+			crate::overlay::OVERLAY_MIN_WIDTH,
+			crate::overlay::OVERLAY_MAX_WIDTH,
+		);
+		let overlay_h = crate::overlay::OVERLAY_HEIGHT;
+
 		let viewport_id = egui::ViewportId::from_hash_of("wfbuddy.relicreward_overlay");
 		let builder = egui::ViewportBuilder::default()
 			.with_title("WFBuddy Overlay")
 			.with_decorations(false)
 			.with_resizable(false)
-			.with_transparent(true)
+			.with_transparent(cfg.overlay_transparent_window)
 			.with_window_level(egui::viewport::WindowLevel::AlwaysOnTop)
 			.with_mouse_passthrough(cfg.overlay_mouse_passthrough)
-			.with_inner_size(egui::vec2(crate::overlay::OVERLAY_WIDTH, crate::overlay::OVERLAY_HEIGHT));
+			.with_inner_size(egui::vec2(overlay_w, overlay_h));
 
 		parent_ctx.show_viewport_deferred(viewport_id, builder, move |ctx, _class| {
-			// Semi-transparent background, borderless.
+			// IMPORTANT: for per-pixel transparency we need to clear with alpha=0.
+			// In eframe this is tied to visuals.window_fill for the viewport.
+			// See egui docs for ViewportBuilder.
 			let mut style = (*ctx.style()).clone();
-			style.visuals.window_fill = egui::Color32::from_black_alpha(160);
+			if cfg.overlay_transparent_window {
+				style.visuals.window_fill = egui::Color32::TRANSPARENT;
+				style.visuals.panel_fill = egui::Color32::TRANSPARENT;
+			} else {
+				// If the system/GL config doesn't support transparent windows, keep it
+				// opaque but compact.
+				style.visuals.window_fill = egui::Color32::from_black_alpha(230);
+				style.visuals.panel_fill = egui::Color32::from_black_alpha(230);
+			}
 			ctx.set_style(style);
 
 			// Follow the game window (coordinates are in logical points).
 			if cfg.overlay_follow_game_window && let Some((x, y, w, h)) = game_rect {
-					let ppp = ctx.pixels_per_point();
-					let (x, y, w, h) = (
-						x as f32 / ppp,
-						y as f32 / ppp,
-						w as f32 / ppp,
-						h as f32 / ppp,
-					);
-					let overlay_w = crate::overlay::OVERLAY_WIDTH;
-					let overlay_h = crate::overlay::OVERLAY_HEIGHT;
-					let margin = cfg.overlay_margin_px / ppp;
-					let mut px = x + (w - overlay_w) * 0.5;
-					let mut py = y + h * cfg.overlay_y_ratio - overlay_h * 0.5;
-					// Clamp inside the game window.
-					px = px.clamp(x + margin, x + w - overlay_w - margin);
-					py = py.clamp(y + margin, y + h - overlay_h - margin);
-					ctx.send_viewport_cmd(egui::viewport::ViewportCommand::OuterPosition(egui::pos2(px, py)));
-				}
+				let ppp = ctx.pixels_per_point();
+				let (x, y, w, h) = (
+					x as f32 / ppp,
+					y as f32 / ppp,
+					w as f32 / ppp,
+					h as f32 / ppp,
+				);
+				let margin = cfg.overlay_margin_px / ppp;
+				let mut px = x + (w - overlay_w) * 0.5;
+				let mut py = y + h * cfg.overlay_y_ratio - overlay_h * 0.5;
+				// Clamp inside the game window.
+				px = px.clamp(x + margin, x + w - overlay_w - margin);
+				py = py.clamp(y + margin, y + h - overlay_h - margin);
+				ctx.send_viewport_cmd(egui::viewport::ViewportCommand::OuterPosition(
+					egui::pos2(px, py),
+				));
+			}
+
+			let bg_alpha = if cfg.overlay_transparent_window { 140 } else { 230 };
+			let card_alpha = if cfg.overlay_transparent_window { 110 } else { 210 };
+			let total_plat: f32 = cards.iter().map(|c| c.platinum).sum();
+			let total_ducats: u32 = cards.iter().map(|c| c.ducats).sum();
 
 			egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
-				ui.horizontal(|ui| {
-					ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
-						for card in cards.iter() {
-						let frame = egui::Frame::NONE
-							.fill(egui::Color32::from_black_alpha(120))
-							.stroke(ui.visuals().window_stroke)
-							.corner_radius(egui::CornerRadius::same(10))
-							.inner_margin(egui::Margin::same(10));
-						frame.show(ui, |ui| {
-							ui.set_min_width(210.0);
-							ui.label(egui::RichText::new(card.name.as_str()).strong());
-							ui.add_space(2.0);
-							ui.horizontal(|ui| {
-								ui.label(format!("{}p", card.platinum));
-								ui.label("•");
-								ui.label(format!("{}d", card.ducats));
-							});
-							if card.owned > 0 {
-								ui.label(format!("Owned: {}", card.owned));
-							} else {
-								ui.label("");
-							}
-							ui.add_space(2.0);
-							if card.vaulted {
-								ui.label(egui::RichText::new("Vaulted").strong());
-							} else {
-								ui.label(egui::RichText::new("Not vaulted").weak());
+				ui.spacing_mut().item_spacing = egui::vec2(crate::overlay::OVERLAY_SPACING, 10.0);
+
+				let outer = egui::Frame::NONE
+					.fill(egui::Color32::from_black_alpha(bg_alpha))
+					.stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(40)))
+					.corner_radius(egui::CornerRadius::same(18))
+					.inner_margin(egui::Margin::same(crate::overlay::OVERLAY_PADDING));
+
+				outer.show(ui, |ui| {
+					ui.vertical(|ui| {
+						ui.horizontal(|ui| {
+							for card in cards.iter() {
+								let frame = egui::Frame::NONE
+									.fill(egui::Color32::from_black_alpha(card_alpha))
+									.stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30)))
+									.corner_radius(egui::CornerRadius::same(14))
+									.inner_margin(egui::Margin::same(12.0));
+
+								frame.show(ui, |ui| {
+									ui.set_min_size(egui::vec2(
+										crate::overlay::OVERLAY_CARD_WIDTH,
+										crate::overlay::OVERLAY_CARD_MIN_HEIGHT,
+									));
+
+									ui.horizontal(|ui| {
+										ui.label(
+											egui::RichText::new(card.name.as_str())
+											.strong()
+											.size(16.0),
+										);
+										ui.with_layout(
+											egui::Layout::right_to_left(egui::Align::Center),
+											|ui| {
+												if card.vaulted {
+													ui.label(
+														egui::RichText::new("VAULTED")
+														.strong()
+														.size(12.0),
+													);
+												}
+											},
+										);
+									});
+
+									ui.add_space(6.0);
+									ui.horizontal(|ui| {
+										ui.label(egui::RichText::new(format!("{:.1}p", card.platinum)).size(14.0));
+										ui.label(egui::RichText::new("•").weak());
+										ui.label(egui::RichText::new(format!("{}d", card.ducats)).size(14.0));
+									});
+									ui.add_space(6.0);
+									ui.label(
+										egui::RichText::new(format!("Owned: {}", card.owned)).size(13.0),
+									);
+								});
 							}
 						});
-					}
+
+						ui.add_space(6.0);
+						ui.horizontal(|ui| {
+							ui.label(
+								egui::RichText::new("Use Ctrl+Tab to interact with the overlay")
+								.weak()
+								.size(12.0),
+							);
+							ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+								ui.label(
+									egui::RichText::new(format!("Σ {:.1}p • {}d", total_plat, total_ducats))
+									.weak()
+									.size(12.0),
+								);
+							});
+						});
+					});
 				});
 			});
 		});

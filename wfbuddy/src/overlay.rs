@@ -2,8 +2,20 @@
 ///
 /// The viewport is rendered as a separate, borderless native window (egui viewport).
 /// Sizes are in egui "points" (logical pixels).
-pub const OVERLAY_WIDTH: f32 = 940.0;
-pub const OVERLAY_HEIGHT: f32 = 190.0;
+///
+/// The overlay size is computed dynamically based on the number of cards,
+/// but we keep a couple sane bounds here.
+pub const OVERLAY_MIN_WIDTH: f32 = 520.0;
+pub const OVERLAY_MAX_WIDTH: f32 = 1260.0;
+
+pub const OVERLAY_CARD_WIDTH: f32 = 260.0;
+pub const OVERLAY_CARD_MIN_HEIGHT: f32 = 150.0;
+
+pub const OVERLAY_PADDING: f32 = 14.0;
+pub const OVERLAY_SPACING: f32 = 12.0;
+
+// Includes card row + a small hint/status bar.
+pub const OVERLAY_HEIGHT: f32 = OVERLAY_CARD_MIN_HEIGHT + (OVERLAY_PADDING * 2.0) + 26.0;
 
 /// Default vertical anchor (center of the overlay) positioned just below the in-game relic reward cards.
 ///

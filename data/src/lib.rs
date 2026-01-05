@@ -9,28 +9,110 @@ use anyhow::{Context, Result};
 
 mod schema;
 
+/// A single tradable relic reward item with the values we care about.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ItemEntry {
+	pub platinum: f32,
+	pub ducats: u32,
+	pub vaulted: bool,
+}
+
+/// Persistent dataset used for OCR matching + overlay enrichment.
+///
+/// Notes:
+/// - We keep a `relic_items` set for fast membership checks + Levenshtein search.
+/// - Values live in the `items` map to avoid syncing multiple parallel HashMaps.
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Data {
-	pub platinum_values: HashMap<String, f32>,
-	pub ducat_values: HashMap<String, u32>,
+	pub items: HashMap<String, ItemEntry>,
 	pub relic_items: HashSet<String>,
-	pub vaulted_items: HashSet<String>,
+}
+
+/// Old cache representation (pre-typed `ItemEntry`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct DataV1 {
+	platinum_values: HashMap<String, f32>,
+	ducat_values: HashMap<String, u32>,
+	relic_items: HashSet<String>,
+	vaulted_items: HashSet<String>,
+}
+
+/// Current cache representation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct DataV2 {
+	items: HashMap<String, ItemEntry>,
+	relic_items: HashSet<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+enum DataRepr {
+	V2(DataV2),
+	V1(DataV1),
+}
+
+impl<'de> serde::Deserialize<'de> for Data {
+	fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		match DataRepr::deserialize(deserializer)? {
+			DataRepr::V2(v2) => Ok(Self {
+				items: v2.items,
+				relic_items: v2.relic_items,
+			}),
+			DataRepr::V1(v1) => {
+				// Best-effort upgrade path for older caches.
+				let mut items = HashMap::new();
+				for name in v1.relic_items.iter() {
+					let platinum = v1.platinum_values.get(name).copied().unwrap_or_default();
+					let ducats = v1.ducat_values.get(name).copied().unwrap_or_default();
+					let vaulted = v1.vaulted_items.contains(name);
+					items.insert(
+						name.clone(),
+						ItemEntry {
+							platinum,
+							ducats,
+							vaulted,
+						},
+					);
+				}
+				Ok(Self {
+					items,
+					relic_items: v1.relic_items,
+				})
+			}
+		}
+	}
 }
 
 impl Default for Data {
 	fn default() -> Self {
 		let mut s = Self {
-			platinum_values: HashMap::new(),
-			ducat_values: HashMap::new(),
+			items: HashMap::new(),
 			relic_items: HashSet::new(),
-			vaulted_items: HashSet::new(),
 		};
 
 		// Keep Forma in the dataset so the UI doesn’t special-case “missing data”.
 		// (The value is just a rough ducat-to-plat approximation; adjust if you want.)
-		s.platinum_values.insert("Forma Blueprint".to_string(), (350.0f32 / 3.0).floor() * 0.1);
+		s.items.insert(
+			"Forma Blueprint".to_string(),
+			ItemEntry {
+				platinum: (350.0f32 / 3.0).floor() * 0.1,
+				ducats: 0,
+				vaulted: false,
+			},
+		);
 		s.relic_items.insert("Forma Blueprint".to_string());
-		s.platinum_values.insert("2 X Forma Blueprint".to_string(), (350.0f32 / 3.0).floor() * 0.2);
+
+		s.items.insert(
+			"2 X Forma Blueprint".to_string(),
+			ItemEntry {
+				platinum: (350.0f32 / 3.0).floor() * 0.2,
+				ducats: 0,
+				vaulted: false,
+			},
+		);
 		s.relic_items.insert("2 X Forma Blueprint".to_string());
 
 		s
@@ -73,17 +155,13 @@ impl Data {
 	}
 
 	fn fetch_remote() -> Result<Self> {
-		let mut res = ureq::get(schema::items::URL)
-			.call()
-			.context("GET items")?;
+		let mut res = ureq::get(schema::items::URL).call().context("GET items")?;
 		let items = res
 			.body_mut()
 			.read_json::<schema::items::Items>()
 			.context("Decode items JSON")?;
 
-		let mut res = ureq::get(schema::ducats::URL)
-			.call()
-			.context("GET ducats")?;
+		let mut res = ureq::get(schema::ducats::URL).call().context("GET ducats")?;
 		let ducats = res
 			.body_mut()
 			.read_json::<schema::ducats::Ducats>()
@@ -96,18 +174,14 @@ impl Data {
 			.collect::<HashMap<_, _>>();
 
 		let mut s = Self {
-			platinum_values: HashMap::new(),
-			ducat_values: HashMap::new(),
+			items: HashMap::new(),
 			relic_items: HashSet::new(),
-			vaulted_items: HashSet::new(),
 		};
 
 		// Populate vaulted status using WarframeStat's static processing dataset.
 		// We intentionally keep this best-effort: if the endpoint is unavailable
 		// we still want the app to work.
-		if let Ok(vaulted) = fetch_vaulted_items() {
-			s.vaulted_items = vaulted;
-		}
+		let vaulted_items = fetch_vaulted_items().unwrap_or_default();
 
 		for v in &ducats.payload.previous_hour {
 			let name = name_map
@@ -123,17 +197,22 @@ impl Data {
 			if is_prime_set_name(&name) {
 				continue;
 			}
-			s.platinum_values.insert(name.clone(), v.wa_price);
-			s.ducat_values.insert(name.clone(), v.ducats);
+
+			s.items.insert(
+				name.clone(),
+				ItemEntry {
+					platinum: v.wa_price,
+					ducats: v.ducats,
+					vaulted: vaulted_items.contains(&name),
+				},
+			);
 			s.relic_items.insert(name);
 		}
 
 		// Ensure Forma entries exist even if the remote feed changes.
 		let mut out = Self::default();
-		out.platinum_values.extend(s.platinum_values);
-		out.ducat_values.extend(s.ducat_values);
+		out.items.extend(s.items);
 		out.relic_items.extend(s.relic_items);
-		out.vaulted_items.extend(s.vaulted_items);
 		Ok(out)
 	}
 
@@ -163,7 +242,19 @@ impl Data {
 		})
 	}
 
-	/// Attempts to find the closest item name from a dirty ocr string
+	pub fn platinum(&self, name: &str) -> f32 {
+		self.items.get(name).map(|v| v.platinum).unwrap_or_default()
+	}
+
+	pub fn ducats(&self, name: &str) -> u32 {
+		self.items.get(name).map(|v| v.ducats).unwrap_or_default()
+	}
+
+	pub fn is_vaulted(&self, name: &str) -> bool {
+		self.items.get(name).map(|v| v.vaulted).unwrap_or(false)
+	}
+
+	/// Attempts to find the closest item name from a dirty ocr string.
 	pub fn find_item_name(&self, name: &str) -> String {
 		let name = name.trim_ascii();
 		// If OCR completely fails, it sometimes returns just "SET".

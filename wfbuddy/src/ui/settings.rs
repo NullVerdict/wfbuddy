@@ -39,6 +39,10 @@ pub fn ui(ui: &mut egui::Ui, modules: &mut [Box<dyn crate::module::Module>]) {
 	ui.separator();
 	ui.label("Overlay");
 	changed |= ui.checkbox(&mut config.overlay_relicreward_enabled, "Relic rewards overlay").changed();
+	changed |= ui.checkbox(
+		&mut config.overlay_transparent_window,
+		"Try transparent overlay window (may not work on some systems)",
+	).changed();
 	changed |= ui.checkbox(&mut config.overlay_follow_game_window, "Follow game window").changed();
 	changed |= ui.checkbox(&mut config.overlay_mouse_passthrough, "Click-through (mouse passthrough)").changed();
 	ui.add_enabled_ui(config.overlay_follow_game_window, |ui| {
