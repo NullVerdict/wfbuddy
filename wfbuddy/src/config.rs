@@ -1,53 +1,80 @@
-use std::{fs::File, io::{BufReader, BufWriter}};
+//! Persistent application configuration.
+//!
+//! Stored as JSON in a platform-appropriate config directory.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(default)]
+/// On-disk configuration for the application.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-	pub app_id: String,
-	pub theme: ie::Theme,
-	pub client_language: data::Language,
-	
-	// not used anymore (for now?), the game buffering writing to log could take 10+ sec, making it nearly useless
-	pub log_path: String,
-	pub pol_delay: f32,
-	
-	pub relicreward_valuedforma: bool,
-}
+    /// Target window application name (from `xcap::Window::app_name()`).
+    ///
+    /// This is reasonably stable across restarts. If multiple windows share the
+    /// same app name, the first match is used.
+    pub app_name: String,
 
-impl Config {
-	pub fn load() -> Self {
-		let Ok(file) = File::open(dirs::config_dir().unwrap().join("WFBuddy").join("config.json")) else {return Default::default()};
-		serde_json::from_reader(BufReader::new(file)).unwrap_or_default()
-	}
-	
-	pub fn save(&self) {
-		let dir_path = dirs::config_dir().unwrap().join("WFBuddy");
-		_ = std::fs::create_dir_all(&dir_path);
-		let config_path = dir_path.join("config.json");
-		let writer = BufWriter::new(File::create(config_path).unwrap());
-		serde_json::to_writer(writer, self).unwrap()
-	}
+    /// Poll interval (seconds) for lightweight screen checks.
+    pub poll_delay_s: f32,
+
+    /// UI theme colors sampled from the in-game options screen.
+    pub theme: ie::Theme,
+
+    /// Optional max capture height (downscales large captures for performance).
+    pub max_capture_height: Option<u32>,
 }
 
 impl Default for Config {
-	fn default() -> Self {
-		Self {
-			// TODO: check if same on windows
-			app_id: "steam_app_230410".to_string(),
-			theme: ie::Theme {
-				primary: ie::Color::WHITE,
-				secondary: ie::Color::WHITE,
-			},
-			client_language: data::Language::English,
-			
-			#[cfg(unix)]
-			log_path: dirs::home_dir().unwrap().join(".steam/steam/steamapps/compatdata/230410/pfx/drive_c/users/steamuser/AppData/Local/Warframe/EE.log").to_string_lossy().to_string(),
-			#[cfg(windows)]
-			log_path: dirs::cache_dir().unwrap().join("Warframe/EE.log").to_string_lossy().to_string(),
-			pol_delay: 3.0,
-			
-			relicreward_valuedforma: true,
-		}
-	}
+    fn default() -> Self {
+        Self {
+            app_name: "steam_app_230410".to_string(),
+            poll_delay_s: 1.0,
+            theme: ie::Theme::WHITE,
+            max_capture_height: Some(1080),
+        }
+    }
+}
+
+impl Config {
+    /// Path to the config file.
+    pub fn path() -> Result<PathBuf> {
+        let base = dirs::config_dir().context("config_dir() unavailable")?;
+        Ok(base.join("wfbuddy.json"))
+    }
+
+    /// Load configuration from disk, falling back to defaults on missing file.
+    pub fn load_or_default() -> Self {
+        match Self::try_load() {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to load config; using defaults");
+                Self::default()
+            }
+        }
+    }
+
+    /// Try to load configuration from disk.
+    pub fn try_load() -> Result<Self> {
+        let path = Self::path()?;
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let json = fs::read_to_string(&path).with_context(|| format!("read {:?}", path))?;
+        let cfg = serde_json::from_str(&json).with_context(|| format!("parse {:?}", path))?;
+        Ok(cfg)
+    }
+
+    /// Save configuration to disk.
+    pub fn save(&self) -> Result<()> {
+        let path = Self::path()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {:?}", parent))?;
+        }
+        let json = serde_json::to_string_pretty(self).context("serialize config")?;
+        fs::write(&path, json).with_context(|| format!("write {:?}", path))?;
+        Ok(())
+    }
 }

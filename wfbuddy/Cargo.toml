@@ -3,24 +3,23 @@ name = "wfbuddy"
 version = "0.1.0"
 edition = "2024"
 
-# [[bin]]
-# name = "test"
-
-[[bin]]
-name = "windows"
-
 [dependencies]
-png = "0.18"
-xcap = "0.7.1"
-regex = "1.12.2"
-notify = "8.2.0"
-anyhow = "1.0.100"
-egui = "0.33.3"
-eframe = "0.33.3"
-dirs = "6.0.0"
-serde = {version = "1.0.228", features = ["derive"]}
-serde_json = "1.0.145"
-levenshtein = "1.0.5"
+# Internal crates
+ie = { path = "../ie" }
+data = { path = "../data" }
 
-ie = {path = "../ie"}
-data = {path = "../data"}
+# GUI (retained-mode)
+iced = { version = "0.14.0", features = ["tokio"] }
+
+# Platform/window capture
+xcap = "0.2.2"
+dirs = "6.0.0"
+
+# Serialization (config)
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+
+# Error handling & logging
+anyhow = "1.0.97"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }

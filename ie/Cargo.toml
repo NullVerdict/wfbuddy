@@ -7,10 +7,22 @@ edition = "2024"
 name = "model_downloader"
 
 [dependencies]
+anyhow = "1.0.97"
 regex = "1.12.2"
+serde = { version = "1.0.228", features = ["derive"] }
+
+# Image processing:
+# - `image` provides core image types and PNG decoding/encoding.
+# - `imageproc` provides thresholding, morphology, and contour detection.
+image = "0.25.0"
+imageproc = "0.26.0"
+
+# Fast resizing (SIMD-optimized). Used for upscaling text crops before OCR.
 fast_image_resize = "5.4"
-# ocrs = "0.11"
-rten = {version = "0.22.1", default-features = false}
-serde = {version = "1.0.228", features = ["derive"]}
-png = "0.18"
-ocr-rs = {git = "https://github.com/zibo-chen/rust-paddle-ocr.git", rev = "2ef84ebbc1d07d8ea6296340e3c05496bd7dfe8e"}
+
+# OCR engine (Rust PaddleOCR bindings).
+# Using a crates.io release improves reproducibility over a git rev.
+ocr-rs = "2.0.2"
+
+# Used by the optional model_downloader binary.
+ureq = "2.12.1"

@@ -1,26 +1,16 @@
-use std::sync::{Arc, LazyLock, Mutex};
+//! WFBuddy (iced edition).
+//!
+//! This binary hosts the retained-mode GUI and orchestrates background polling.
 
-pub mod util;
-pub mod capture;
-// mod logwatcher;
-mod iepol;
-mod module;
-mod ui;
-pub use ui::UiExt;
+mod app;
+mod capture;
 mod config;
 
-pub type Uniform = Arc<UniformData>;
-pub struct UniformData {
-	pub iepol: iepol::IePol,
-	pub data: data::Data,
-	pub ie: Arc<ie::Ie>,
-}
+fn main() -> iced::Result {
+    // Structured logging. Use `RUST_LOG=info` etc.
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
-static CONFIG: LazyLock<Arc<Mutex<config::Config>>> = LazyLock::new(|| Arc::new(Mutex::new(config::Config::load())));
-pub fn config() -> std::sync::MutexGuard<'static, config::Config> {
-	CONFIG.lock().unwrap()
-}
-
-fn main() {
-	eframe::run_native("WFBuddy", Default::default(), Box::new(|cc| Ok(Box::new(ui::WFBuddy::new(cc))))).unwrap();
+    app::run()
 }
