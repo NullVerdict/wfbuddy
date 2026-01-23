@@ -2,6 +2,10 @@
 
 use anyhow::{anyhow, Context, Result};
 
+// `xcap` re-exports `image` types. The `as_bytes()` helper is provided via the
+// `EncodableLayout` trait.
+use xcap::image::EncodableLayout;
+
 /// Basic window descriptor for UI selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowInfo {
@@ -29,8 +33,8 @@ pub fn list_windows() -> Result<Vec<WindowInfo>> {
         // Some platforms may return empty strings; keep them but UI can filter.
         out.push(WindowInfo {
             id: w.id(),
-            app_name: w.app_name(),
-            title: w.title(),
+			app_name: w.app_name().to_string(),
+			title: w.title().to_string(),
         });
     }
 

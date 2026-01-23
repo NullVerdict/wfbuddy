@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use iced::widget::{Button, Checkbox, Column, Container, PickList, Row, Scrollable, Text, TextInput};
+use iced::widget::{
+	button, container, Button, Checkbox, Column, Container, PickList, Row, Scrollable, Text, TextInput,
+};
 use iced::{Element, Length, Subscription, Task};
 
 use crate::capture::{capture_by_app_name, list_windows, WindowInfo};
@@ -443,11 +445,14 @@ impl App {
     }
 
     fn view_settings(&self) -> Element<Message> {
+        // Ensure both branches return the same type.
+        // We keep the internal widget types flexible by converting to `Element`.
         let window_picker = if self.windows.is_empty() {
             Column::new()
                 .spacing(6)
                 .push(Text::new("No windows found (or permission issue)."))
                 .push(Button::new(Text::new("Refresh Windows")).on_press(Message::RefreshWindows))
+                .into()
         } else {
             let mut row = Row::new().spacing(10);
 
@@ -461,7 +466,7 @@ impl App {
             );
 
             row = row.push(Button::new(Text::new("Refresh")).on_press(Message::RefreshWindows));
-            row
+            row.into()
         };
 
         let app_name = TextInput::new("app_name (xcap)", &self.app_name_input)
@@ -507,7 +512,13 @@ impl App {
             Row::new()
                 .spacing(10)
                 .push(Button::new(Text::new("Poll Now")).on_press(Message::PollRelicNow))
-                .push(Checkbox::new("Valued Forma", self.relic.valued_forma).on_toggle(Message::ValuedFormaToggled)),
+                .push(
+                    // iced 0.14: Checkbox::new only takes the checked state.
+                    // Set the label separately.
+                    Checkbox::new(self.relic.valued_forma)
+                        .label("Valued Forma")
+                        .on_toggle(Message::ValuedFormaToggled),
+                ),
         );
 
         if let Some(rewards) = &self.relic.rewards {
@@ -542,15 +553,11 @@ impl App {
                     line.push_str("  [RELIC]");
                 }
 
-                let text = Text::new(line);
+				let text = Text::new(line);
 
-                let row = if selected {
-                    Container::new(text).padding(6)
-                } else {
-                    Container::new(text).padding(6)
-                };
-
-                list = list.push(row);
+				// Highlight the currently-selected reward row.
+				let style = if selected { container::primary } else { container::transparent };
+				list = list.push(Container::new(text).padding(6).style(style));
             }
 
             col = col.push(Scrollable::new(list).height(Length::Fill));
@@ -583,7 +590,9 @@ impl App {
         };
 
         // Best-effort mapping: if anything is missing, return partial info.
-        let canonical = data.find_item_name(name);
+        // `data::Data::find_item_name` expects a `(Language, &str)` tuple (or similar)
+        // so it can apply language-specific matching.
+        let canonical = data.find_item_name((data::Language::English, name));
 
         let id = data.id_manager.get_id_from_en(canonical);
         let Some(id) = id else {
@@ -600,11 +609,11 @@ impl App {
 
 fn tab_button(current: Tab, tab: Tab) -> Element<'static, Message> {
     let label = Text::new(tab.to_string());
-    let mut btn = Button::new(label).on_press(Message::TabSelected(tab));
-    if current == tab {
-        btn = btn; // placeholder for styling
-    }
-    btn.into()
+    let style = if current == tab { button::primary } else { button::secondary };
+	Button::new(label)
+		.on_press(Message::TabSelected(tab))
+		.style(style)
+		.into()
 }
 
 fn resolve_model_path(rel: &str) -> PathBuf {

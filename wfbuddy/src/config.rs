@@ -3,7 +3,7 @@
 //! Stored as JSON in a platform-appropriate config directory.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
