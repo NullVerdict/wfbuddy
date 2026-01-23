@@ -447,7 +447,7 @@ impl App {
     fn view_settings(&self) -> Element<Message> {
         // Ensure both branches return the same type.
         // We keep the internal widget types flexible by converting to `Element`.
-        let window_picker = if self.windows.is_empty() {
+        let window_picker: Element<Message> = if self.windows.is_empty() {
             Column::new()
                 .spacing(6)
                 .push(Text::new("No windows found (or permission issue)."))
