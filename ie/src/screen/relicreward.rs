@@ -8,7 +8,7 @@
 
 use regex::Regex;
 
-use crate::{Color, Image, Theme};
+use crate::{Image, Theme};
 
 #[derive(Debug, Clone)]
 pub struct Rewards {
@@ -289,7 +289,7 @@ fn detect_reward_slots(image: Image) -> Vec<Rect> {
 
     // Sort left-to-right and deduplicate heavy overlaps.
     best_row.sort_by_key(|r| r.x);
-    let mut dedup = Vec::new();
+    let mut dedup: Vec<Rect> = Vec::new();
     for r in best_row {
         if let Some(prev) = dedup.last_mut() {
             if prev.iou(&r) > 0.5 {

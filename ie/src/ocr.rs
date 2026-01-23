@@ -23,8 +23,10 @@ impl Ocr {
         recognition: impl AsRef<Path>,
         charsset: impl AsRef<Path>,
     ) -> Self {
-        let thread_count = std::thread::available_parallelism()
-            .map(|n| n.get())
+        // `ocr-rs` expects an `i32` thread count. Clamp safely in case the
+        // platform reports an unusually large value.
+        let thread_count: i32 = std::thread::available_parallelism()
+            .map(|n| n.get().min(i32::MAX as usize) as i32)
             .unwrap_or(1);
 
         let engine = ocr_rs::OcrEngine::new(

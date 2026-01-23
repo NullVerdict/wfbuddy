@@ -1,3 +1,11 @@
+//! PublicExport schema: `ExportRelicArcane`.
+//!
+//! The upstream JSON payload contains both relic and arcane entries. This
+//! module keeps the full schema for forward compatibility, even if some fields
+//! are not currently used by the application logic.
+
+#![allow(dead_code)]
+
 #[derive(serde::Deserialize)]
 pub struct RelicArcane {
 	#[serde(rename = "ExportRelicArcane")]
