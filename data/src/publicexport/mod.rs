@@ -30,15 +30,19 @@ impl PublicExport {
 		let urls = String::from_utf8(urls)?;
 		let urls = urls.split("\r\n").collect::<Vec<_>>();
 		
-		println!("urls: {urls:#?}");
-		
 		Ok(Self {
-			relic_arcane_url: manifest_url(select_url(&urls, "ExportRelicArcane").ok_or(anyhow::Error::msg(format!("index didn't contain ExportRelicArcane")))?),
-			recipes_url: manifest_url(select_url(&urls, "ExportRecipes").ok_or(anyhow::Error::msg(format!("index didn't contain ExportRecipes")))?),
-			resources_url: manifest_url(select_url(&urls, "ExportResources").ok_or(anyhow::Error::msg(format!("index didn't contain ExportResources")))?),
-			warframes_url: manifest_url(select_url(&urls, "ExportWarframes").ok_or(anyhow::Error::msg(format!("index didn't contain ExportWarframes")))?),
-			weapons_url: manifest_url(select_url(&urls, "ExportWeapons").ok_or(anyhow::Error::msg(format!("index didn't contain ExportWeapons")))?),
-			sentinels_url: manifest_url(select_url(&urls, "ExportSentinels").ok_or(anyhow::Error::msg(format!("index didn't contain ExportSentinels")))?),
+			relic_arcane_url: manifest_url(select_url(&urls, "ExportRelicArcane")
+				.ok_or_else(|| anyhow::Error::msg("index didn't contain ExportRelicArcane"))?),
+			recipes_url: manifest_url(select_url(&urls, "ExportRecipes")
+				.ok_or_else(|| anyhow::Error::msg("index didn't contain ExportRecipes"))?),
+			resources_url: manifest_url(select_url(&urls, "ExportResources")
+				.ok_or_else(|| anyhow::Error::msg("index didn't contain ExportResources"))?),
+			warframes_url: manifest_url(select_url(&urls, "ExportWarframes")
+				.ok_or_else(|| anyhow::Error::msg("index didn't contain ExportWarframes"))?),
+			weapons_url: manifest_url(select_url(&urls, "ExportWeapons")
+				.ok_or_else(|| anyhow::Error::msg("index didn't contain ExportWeapons"))?),
+			sentinels_url: manifest_url(select_url(&urls, "ExportSentinels")
+				.ok_or_else(|| anyhow::Error::msg("index didn't contain ExportSentinels"))?),
 		})
 	}
 	
